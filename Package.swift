@@ -2,24 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "CleanShotClone",
+    name: "Catch",
     platforms: [
         .macOS(.v14)
     ],
     products: [
         .library(
-            name: "CleanShotCore",
-            targets: ["CleanShotCore"]
+            name: "CatchCore",
+            targets: ["CatchCore"]
         ),
         .executable(
-            name: "CleanShotClone",
-            targets: ["CleanShotClone"]
+            name: "Catch",
+            targets: ["Catch"]
         )
     ],
     targets: [
         .target(
-            name: "CleanShotCore",
-            path: "Sources/CleanShotCore",
+            name: "CatchCore",
+            path: "Sources/CatchCore",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI"),
@@ -29,18 +29,19 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("UniformTypeIdentifiers"),
                 .linkedFramework("Network"),
+                .linkedFramework("AVFoundation"),
                 .linkedLibrary("sqlite3")
             ]
         ),
         .executableTarget(
-            name: "CleanShotClone",
-            dependencies: ["CleanShotCore"],
-            path: "Sources/CleanShotClone"
+            name: "Catch",
+            dependencies: ["CatchCore"],
+            path: "Sources/Catch"
         ),
         .testTarget(
-            name: "CleanShotCloneTests",
-            dependencies: ["CleanShotCore"],
-            path: "Tests/CleanShotCloneTests"
+            name: "CatchTests",
+            dependencies: ["CatchCore"],
+            path: "Tests/CatchTests"
         )
     ]
 )

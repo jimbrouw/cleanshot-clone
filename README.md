@@ -1,4 +1,4 @@
-# CleanShot Clone (macOS Native Swift)
+# Catch (macOS Native Swift)
 
 A native macOS screen capture, annotation, background framing, scrolling capture, on-device OCR, and pinned-screenshot suite built in Swift (AppKit, SwiftUI, ScreenCaptureKit, Vision, CoreImage, SQLite3).
 
@@ -11,13 +11,13 @@ A native macOS screen capture, annotation, background framing, scrolling capture
   - 13 tools: Select, Crop & Resize (rotate/flip), Arrow (4 styles + `Option` invert), Rectangle, Filled Rectangle, Ellipse, Line, Pencil (auto-smoothing), Highlighter, Text (7 styles: `Standard`, `Rounded Boxed`, `Rounded`, `Monospaced`, `Monospaced Boxed`, `Outlined`, `Boxed`), Counter (`1, 2, 3...`), Spotlight, Pixelate (with block randomization), and Blur (`Smooth` & `Secure`).
   - Eyedropper Color Picker (`Hex`, `RGB`, `Alpha`, `+ Add to My Colors`), Auto-Expand Canvas, Multi-Image Combine via drag-and-drop, and `"Drag me"` titlebar export.
   - Background Tool with 20 built-in gradients/wallpapers, blurred/plain/custom image backdrops, padding, corner radius, shadow, aspect ratios, Auto-Balance Content, and Brand Presets.
-  - Editable `.cleanshot` project bundle format (`base.png`, `preview.png`, `project.json`).
+  - Editable `.catch` project bundle format (`base.png`, `preview.png`, `project.json`).
 - **On-Device Text Recognition (OCR) & QR Codes**: Apple `Vision` (`VNRecognizeTextRequest` + `VNDetectBarcodesRequest`) with line-break and link detection.
 - **Pinned Screenshots**: Always-on-top floating reference windows with opacity slider, `1px` arrow-key nudging, and click-through **Lock Mode**.
 - **Capture History**: SQLite-backed history browser (`All | Screenshots | Videos | GIFs`), search, retention pruning, and one-click restore.
 - **Cloud Share & Comments Server**: One-click upload with clipboard link copy and local HTTP share viewer supporting spatial comments.
 - **10-Tab Settings & Custom Filename Builder**: All 13 tokens (`%y`, `%m`, `%n`, `%d`, `%w`, `%t`, `%a`, `%H`, `%M`, `%S`, `%p`, `%r`, `%i`), UTC toggle, and illegal-character sanitization.
-- **URL Scheme API (`cleanshot://` / `cleanshotclone://`)**: All 19 documented commands (`all-in-one`, `capture-area`, `capture-previous-area`, `capture-fullscreen`, `capture-window`, `self-timer`, `scrolling-capture`, `pin`, `record-screen`, `capture-text`, `open-annotate`, `open-from-clipboard`, `toggle-desktop-icons`, `hide-desktop-icons`, `show-desktop-icons`, `add-quick-access-overlay`, `open-history`, `restore-recently-closed`, `open-settings`).
+- **URL Scheme API (`catch://`)**: All 19 documented commands (`all-in-one`, `capture-area`, `capture-previous-area`, `capture-fullscreen`, `capture-window`, `self-timer`, `scrolling-capture`, `pin`, `record-screen`, `capture-text`, `open-annotate`, `open-from-clipboard`, `toggle-desktop-icons`, `hide-desktop-icons`, `show-desktop-icons`, `add-quick-access-overlay`, `open-history`, `restore-recently-closed`, `open-settings`).
 
 ## Build, Test & Package
 
@@ -25,5 +25,5 @@ A native macOS screen capture, annotation, background framing, scrolling capture
 swift build
 swift test
 bash scripts/build-app.sh
-open build/CleanShotClone.app
+open build/Catch.app
 ```

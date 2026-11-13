@@ -5,13 +5,13 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>CleanShotClone</string>
+    <string>Catch</string>
     <key>CFBundleIdentifier</key>
-    <string>com.cleanshotclone.app</string>
+    <string>com.catchapp.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>CleanShot Clone</string>
+    <string>Catch</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -25,18 +25,17 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>CleanShot Clone needs Screen Recording access to capture screenshots, windows, scrolling content, and on-device OCR text.</string>
+    <string>Catch needs Screen Recording access to capture screenshots, windows, scrolling content, and on-device OCR text.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>CFBundleURLName</key>
-            <string>com.cleanshotclone.urlscheme</string>
+            <string>com.catchapp.urlscheme</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>cleanshot</string>
-                <string>cleanshotclone</string>
+                <string>catch</string>
             </array>
         </dict>
     </array>
@@ -45,10 +44,10 @@
         <dict>
             <key>CFBundleTypeExtensions</key>
             <array>
-                <string>cleanshot</string>
+                <string>catch</string>
             </array>
             <key>CFBundleTypeName</key>
-            <string>CleanShot Project</string>
+            <string>Catch Project</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSTypeIsPackage</key>
@@ -63,14 +62,14 @@
                 <string>com.apple.package</string>
             </array>
             <key>UTTypeDescription</key>
-            <string>CleanShot Editable Project</string>
+            <string>Catch Editable Project</string>
             <key>UTTypeIdentifier</key>
-            <string>com.cleanshotclone.project</string>
+            <string>com.catchapp.project</string>
             <key>UTTypeTagSpecification</key>
             <dict>
                 <key>public.filename-extension</key>
                 <array>
-                    <string>cleanshot</string>
+                    <string>catch</string>
                 </array>
             </dict>
         </dict>

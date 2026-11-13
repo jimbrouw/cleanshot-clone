@@ -1,0 +1,3 @@
+import CatchCore
+
+CatchAppRunner.run()
