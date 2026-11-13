@@ -379,6 +379,33 @@ public extension View {
     }
 
     @ViewBuilder
+    func raycastCardSurface(cornerRadius: CGFloat = 14, isHighlighted: Bool = false) -> some View {
+        self
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(RaycastTheme.panelSurface.opacity(0.92))
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(isHighlighted ? 0.08 : 0.045), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        isHighlighted ? RaycastTheme.borderHighlight : RaycastTheme.borderSubtle,
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.28), radius: 8, x: 0, y: 4)
+    }
+
+    @ViewBuilder
     func raycastGlassButton(prominent: Bool = false) -> some View {
         if #available(macOS 26.0, *) {
             if prominent {
