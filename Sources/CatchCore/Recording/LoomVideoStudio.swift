@@ -35,9 +35,11 @@ public final class TeleprompterController: ObservableObject {
     @Published public var hideFromCapture: Bool {
         didSet {
             UserDefaults.standard.set(hideFromCapture, forKey: hideKey)
+            let hidden = hideFromCapture
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.panel?.sharingType = self.hideFromCapture ? .none : .readOnly
+                self.panel?.sharingType = hidden ? .none : .readOnly
+                ScreenRecordingStudio.shared.refreshStreamContentFilter()
             }
         }
     }
@@ -48,6 +50,16 @@ public final class TeleprompterController: ObservableObject {
 
     private var panel: NSPanel?
     private var scrollTimer: Timer?
+
+    public var windowNumber: Int? {
+        panel?.windowNumber
+    }
+
+    public func toggleHideFromCapture() {
+        hideFromCapture.toggle()
+        panel?.sharingType = hideFromCapture ? .none : .readOnly
+        ScreenRecordingStudio.shared.refreshStreamContentFilter()
+    }
 
     public init() {
         let defaults = UserDefaults.standard
@@ -89,7 +101,7 @@ public final class TeleprompterController: ObservableObject {
 
             let panel = KeyableHUDPanel(
                 contentRect: CGRect(origin: origin, size: CGSize(width: width, height: height)),
-                styleMask: [.borderless, .nonactivatingPanel, .resizable],
+                styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
@@ -99,11 +111,11 @@ public final class TeleprompterController: ObservableObject {
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = true
-            panel.minSize = CGSize(width: 400, height: 190)
             panel.sharingType = self.hideFromCapture ? .none : .readOnly
 
             let hosting = NSHostingView(rootView: TeleprompterPanelView(controller: self))
             panel.contentView = hosting
+            panel.invalidateShadow()
             panel.orderFrontRegardless()
             self.panel = panel
         }
@@ -180,16 +192,30 @@ private struct TeleprompterPanelView: View {
                         .foregroundStyle(RaycastTheme.textSecondary)
                 }
 
-                Toggle(isOn: $controller.hideFromCapture) {
-                    Label(
-                        controller.hideFromCapture ? "Invisible on Recording" : "Visible on Recording",
-                        systemImage: controller.hideFromCapture ? "eye.slash.fill" : "eye.fill"
+                Button {
+                    controller.toggleHideFromCapture()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: controller.hideFromCapture ? "eye.slash.fill" : "eye.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(controller.hideFromCapture ? "Invisible on Recording" : "Visible on Recording")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(controller.hideFromCapture ? Color.green : Color.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill((controller.hideFromCapture ? Color.green : Color.orange).opacity(0.18))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder((controller.hideFromCapture ? Color.green : Color.orange).opacity(0.45), lineWidth: 1)
+                            )
                     )
-                    .font(.system(size: 10, weight: .semibold))
+                    .contentShape(Capsule())
                 }
-                .toggleStyle(.button)
-                .controlSize(.mini)
-                .tint(controller.hideFromCapture ? .green : .orange)
+                .buttonStyle(.plain)
+                .help("Click to toggle whether the teleprompter is hidden or visible in screen recordings")
 
                 Spacer()
 
@@ -284,20 +310,37 @@ private struct TeleprompterPanelView: View {
                         controller.play()
                     }
                 } label: {
-                    Label(controller.isPlaying ? "Pause" : "Scroll", systemImage: controller.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 11, weight: .semibold))
+                    HStack(spacing: 4) {
+                        Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                        Text(controller.isPlaying ? "Pause" : "Scroll")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(controller.isPlaying ? Color.orange : RaycastTheme.accent)
+                    )
+                    .contentShape(Rectangle())
                 }
-                .raycastGlassButton(prominent: true)
-                .tint(controller.isPlaying ? .orange : RaycastTheme.accent)
-                .controlSize(.small)
+                .buttonStyle(.plain)
 
                 Button {
                     controller.reset()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.textPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.white.opacity(0.10))
+                        )
+                        .contentShape(Rectangle())
                 }
-                .raycastGlassButton(prominent: false)
-                .controlSize(.small)
+                .buttonStyle(.plain)
                 .help("Reset to Top")
 
                 HStack(spacing: 4) {
@@ -312,18 +355,26 @@ private struct TeleprompterPanelView: View {
                     Button {
                         controller.fontSize = max(14, controller.fontSize - 2)
                     } label: {
-                        Text("A-").font(.system(size: 10, weight: .semibold))
+                        Text("A-")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(RaycastTheme.textPrimary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.10)))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
 
                     Button {
                         controller.fontSize = min(38, controller.fontSize + 2)
                     } label: {
-                        Text("A+").font(.system(size: 11, weight: .bold))
+                        Text("A+")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(RaycastTheme.textPrimary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.10)))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
                 }
 
                 Spacer()
@@ -334,11 +385,21 @@ private struct TeleprompterPanelView: View {
                         controller.pause()
                     }
                 } label: {
-                    Label(controller.isEditingScript ? "Done" : "Edit Script", systemImage: controller.isEditingScript ? "checkmark" : "square.and.pencil")
-                        .font(.system(size: 10.5, weight: .medium))
+                    HStack(spacing: 4) {
+                        Image(systemName: controller.isEditingScript ? "checkmark" : "square.and.pencil")
+                        Text(controller.isEditingScript ? "Done" : "Edit Script")
+                    }
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(RaycastTheme.textPrimary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.white.opacity(0.10))
+                    )
+                    .contentShape(Rectangle())
                 }
-                .raycastGlassButton(prominent: false)
-                .controlSize(.small)
+                .buttonStyle(.plain)
             }
         }
         .padding(12)
@@ -439,6 +500,7 @@ public final class CameraBubbleController: ObservableObject {
             hosting.sizingOptions = []
             hosting.frame = CGRect(origin: .zero, size: CGSize(width: dim, height: dim))
             panel.contentView = hosting
+            panel.invalidateShadow()
             panel.orderFrontRegardless()
             self.panel = panel
             self.startCameraIfAuthorized()
@@ -482,6 +544,7 @@ public final class CameraBubbleController: ObservableObject {
         let updated = CGRect(x: old.origin.x, y: old.origin.y, width: dim, height: dim)
         panel.setFrame(updated, display: true, animate: true)
         panel.contentView?.frame = CGRect(origin: .zero, size: CGSize(width: dim, height: dim))
+        panel.invalidateShadow()
     }
 
     private func startCameraIfAuthorized() {
@@ -560,7 +623,7 @@ private struct CameraBubbleView: View {
 
         ZStack {
             if controller.hasLiveCameraFeed, let session = controller.activeSession {
-                CameraPreviewLayerView(session: session, isMirrored: controller.isMirrored)
+                CameraPreviewLayerView(session: session, isMirrored: controller.isMirrored, cornerRadius: radius)
             } else {
                 ZStack {
                     LinearGradient(
@@ -585,43 +648,61 @@ private struct CameraBubbleView: View {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(RaycastTheme.specularGradient, lineWidth: 2)
         )
-        .shadow(color: Color.black.opacity(0.45), radius: 14, x: 0, y: 6)
         .overlay(alignment: .bottom) {
             if isHovered {
                 HStack(spacing: 6) {
-                    Button(controller.bubbleSize.label) {
+                    Button {
                         controller.cycleSize()
+                    } label: {
+                        Text(controller.bubbleSize.label)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.white.opacity(0.18)))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
 
                     Button {
                         controller.toggleShape()
                     } label: {
                         Image(systemName: controller.shape == .circle ? "square.dashed" : "circle")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(Circle().fill(Color.white.opacity(0.18)))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
 
                     Button {
                         controller.isMirrored.toggle()
                     } label: {
                         Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(Circle().fill(Color.white.opacity(0.18)))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
 
                     Button {
                         controller.hide()
                     } label: {
                         Image(systemName: "xmark")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(Circle().fill(Color.white.opacity(0.18)))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(.ultraThinMaterial, in: Capsule())
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.75))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.75))
+                )
                 .padding(.bottom, 10)
                 .transition(.scale.combined(with: .opacity))
             }
@@ -636,12 +717,14 @@ private struct CameraBubbleView: View {
 private struct CameraPreviewLayerView: NSViewRepresentable {
     let session: AVCaptureSession
     let isMirrored: Bool
+    let cornerRadius: CGFloat
 
     func makeNSView(context: Context) -> CameraPreviewNSView {
         let view = CameraPreviewNSView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
         view.updateMirroring(isMirrored)
+        view.updateCornerRadius(cornerRadius)
         return view
     }
 
@@ -650,6 +733,7 @@ private struct CameraPreviewLayerView: NSViewRepresentable {
             nsView.previewLayer.session = session
         }
         nsView.updateMirroring(isMirrored)
+        nsView.updateCornerRadius(cornerRadius)
     }
 }
 
@@ -659,6 +743,8 @@ private final class CameraPreviewNSView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.masksToBounds = true
+        previewLayer.masksToBounds = true
         layer?.addSublayer(previewLayer)
     }
 
@@ -676,6 +762,13 @@ private final class CameraPreviewNSView: NSView {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = mirrored
         }
+    }
+
+    func updateCornerRadius(_ radius: CGFloat) {
+        layer?.cornerRadius = radius
+        layer?.masksToBounds = true
+        previewLayer.cornerRadius = radius
+        previewLayer.masksToBounds = true
     }
 }
 
@@ -778,6 +871,7 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
 
             let hosting = NSHostingView(rootView: LoomStudioBarView(studio: self))
             panel.contentView = hosting
+            panel.invalidateShadow()
             panel.orderFrontRegardless()
             self.controlBarPanel = panel
         }
@@ -960,7 +1054,19 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 return false
             }
 
-            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let excludedIDs = await MainActor.run { () -> Set<CGWindowID> in
+                var ids: Set<CGWindowID> = []
+                if TeleprompterController.shared.hideFromCapture,
+                   let tpNum = TeleprompterController.shared.windowNumber,
+                   tpNum > 0 {
+                    ids.insert(CGWindowID(tpNum))
+                }
+                if let ctrlNum = self.controlBarPanel?.windowNumber, ctrlNum > 0 {
+                    ids.insert(CGWindowID(ctrlNum))
+                }
+                return ids
+            }
+            let filter = Self.buildContentFilter(display: display, windows: content.windows, excludedIDs: excludedIDs)
             let scale = SettingsStore.shared.recordingScaleRetinaTo1x ? 1.0 : max(1.0, screen.backingScaleFactor)
             let region = (captureMode == .area ? selectedRect : nil) ?? screen.frame
             let targetWidth = max(320, (Int(region.width * scale) / 2) * 2)
@@ -1003,6 +1109,37 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         } catch {
             return false
         }
+    }
+
+    public func refreshStreamContentFilter() {
+        guard let scStream else { return }
+        var excludedIDs: Set<CGWindowID> = []
+        if TeleprompterController.shared.hideFromCapture,
+           let tpNum = TeleprompterController.shared.windowNumber,
+           tpNum > 0 {
+            excludedIDs.insert(CGWindowID(tpNum))
+        }
+        if let ctrlNum = controlBarPanel?.windowNumber, ctrlNum > 0 {
+            excludedIDs.insert(CGWindowID(ctrlNum))
+        }
+        Task {
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+                return
+            }
+            let screen = CaptureEngine.shared.resolveScreen(displayIndex: nil)
+            let targetDisplayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+                ?? CGMainDisplayID()
+            guard let display = content.displays.first(where: { $0.displayID == targetDisplayID }) ?? content.displays.first else {
+                return
+            }
+            let filter = Self.buildContentFilter(display: display, windows: content.windows, excludedIDs: excludedIDs)
+            try? await scStream.updateContentFilter(filter)
+        }
+    }
+
+    private static func buildContentFilter(display: SCDisplay, windows: [SCWindow], excludedIDs: Set<CGWindowID>) -> SCContentFilter {
+        let excludedWindows = windows.filter { excludedIDs.contains($0.windowID) }
+        return SCContentFilter(display: display, excludingWindows: excludedWindows)
     }
 
     private func prepareFallbackWriter(to outputURL: URL) async {
@@ -1245,47 +1382,67 @@ private struct LoomStudioBarView: View {
             }
 
             // Camera Bubble Toggle
-            Toggle(isOn: Binding(
-                get: { studio.showCameraBubble },
-                set: { enabled in
-                    studio.showCameraBubble = enabled
-                    if enabled {
-                        CameraBubbleController.shared.show()
-                    } else {
-                        CameraBubbleController.shared.hide()
-                    }
+            Button {
+                studio.showCameraBubble.toggle()
+                if studio.showCameraBubble {
+                    CameraBubbleController.shared.show()
+                } else {
+                    CameraBubbleController.shared.hide()
                 }
-            )) {
+            } label: {
                 Image(systemName: studio.showCameraBubble ? "video.fill" : "video.slash.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(studio.showCameraBubble ? .white : RaycastTheme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(studio.showCameraBubble ? RaycastTheme.accent.opacity(0.75) : Color.white.opacity(0.08))
+                    )
+                    .contentShape(Rectangle())
             }
-            .toggleStyle(.button)
-            .controlSize(.small)
+            .buttonStyle(.plain)
             .help("Toggle Camera Bubble")
 
             // Microphone Toggle
-            Toggle(isOn: $studio.includeMicrophone) {
+            Button {
+                studio.includeMicrophone.toggle()
+            } label: {
                 Image(systemName: studio.includeMicrophone ? "mic.fill" : "mic.slash.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(studio.includeMicrophone ? .white : RaycastTheme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(studio.includeMicrophone ? RaycastTheme.accent.opacity(0.75) : Color.white.opacity(0.08))
+                    )
+                    .contentShape(Rectangle())
             }
-            .toggleStyle(.button)
-            .controlSize(.small)
+            .buttonStyle(.plain)
             .help("Toggle Microphone")
 
             // Teleprompter Toggle
-            Toggle(isOn: Binding(
-                get: { studio.showTeleprompter },
-                set: { enabled in
-                    studio.showTeleprompter = enabled
-                    if enabled {
-                        TeleprompterController.shared.show()
-                    } else {
-                        TeleprompterController.shared.hide()
-                    }
+            Button {
+                studio.showTeleprompter.toggle()
+                if studio.showTeleprompter {
+                    TeleprompterController.shared.show()
+                } else {
+                    TeleprompterController.shared.hide()
                 }
-            )) {
+            } label: {
                 Image(systemName: "text.justify.left")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(studio.showTeleprompter ? .white : RaycastTheme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(studio.showTeleprompter ? RaycastTheme.accent.opacity(0.75) : Color.white.opacity(0.08))
+                    )
+                    .contentShape(Rectangle())
             }
-            .toggleStyle(.button)
-            .controlSize(.small)
+            .buttonStyle(.plain)
             .help("Toggle Hidden Teleprompter")
 
             Spacer()

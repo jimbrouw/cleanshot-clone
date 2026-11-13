@@ -331,32 +331,27 @@ public struct RaycastLiquidGlassSurface: ViewModifier {
 
     public func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        if #available(macOS 26.0, *) {
-            let baseGlass: Glass = .regular
-                .tint(RaycastTheme.windowBackground.opacity(min(0.92, tintAlpha)))
-                .interactive(isInteractive)
-            content
-                .background(
-                    shape.fill(RaycastTheme.windowBackground.opacity(max(0.88, tintAlpha)))
-                )
-                .glassEffect(baseGlass, in: .rect(cornerRadius: cornerRadius))
-                .clipShape(shape)
-                .overlay(
-                    shape.strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
-                )
-        } else {
-            content
-                .background(
-                    ZStack {
-                        shape.fill(.ultraThinMaterial)
-                        shape.fill(RaycastTheme.windowBackground.opacity(max(0.88, tintAlpha)))
-                    }
-                )
-                .clipShape(shape)
-                .overlay(
-                    shape.strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
-                )
-        }
+        content
+            .background(
+                ZStack {
+                    shape.fill(RaycastTheme.windowBackground.opacity(max(0.94, tintAlpha)))
+                    shape.fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.08),
+                                Color.white.opacity(0.02),
+                                Color.black.opacity(0.18)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                }
+            )
+            .clipShape(shape)
+            .overlay(
+                shape.strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
+            )
     }
 }
 
@@ -473,7 +468,7 @@ public struct RaycastInteractiveTile<Content: View>: View {
 
     @ViewBuilder
     private var tileSurface: some View {
-        let base = content()
+        content()
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(isHovered ? Color.white.opacity(0.13) : Color.white.opacity(0.05))
@@ -485,11 +480,5 @@ public struct RaycastInteractiveTile<Content: View>: View {
                         lineWidth: 0.75
                     )
             )
-
-        if #available(macOS 26.0, *) {
-            base.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
-        } else {
-            base
-        }
     }
 }
