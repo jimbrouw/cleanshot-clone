@@ -32,9 +32,11 @@ public final class SettingsWindowController {
 
 public struct SettingsWindowView: View {
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var clipboardStore = ClipboardHistoryStore.shared
     @State private var selectedTab: SettingsTab
     @State private var shortcutSearch = ""
     @State private var showFileNameBuilder = false
+    @State private var clipboardClearedMessage: String?
 
     public init(initialTab: SettingsTab = .general) {
         _selectedTab = State(initialValue: initialTab)
@@ -84,46 +86,52 @@ public struct SettingsWindowView: View {
     }
 
     private var generalTab: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("General").font(.title2.bold())
-            Toggle("Launch at login", isOn: $settings.launchAtLogin)
-            Toggle("Show menu bar icon", isOn: $settings.showMenuBarIcon)
-            Toggle("Hide desktop icons while capturing", isOn: $settings.hideDesktopIconsWhileCapturing)
-            Toggle("Play sounds", isOn: $settings.playSounds)
 
-            Divider()
-            Text("Export").font(.headline)
-            HStack {
-                Text("Export location: \(settings.exportLocationPath)")
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Button("Choose...") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = false
-                    panel.canChooseDirectories = true
-                    if panel.runModal() == .OK, let url = panel.url {
-                        settings.exportLocationURL = url
+            settingsSectionCard(title: "Application Behavior", icon: "gearshape") {
+                Toggle("Launch at login", isOn: $settings.launchAtLogin)
+                Toggle("Show menu bar icon", isOn: $settings.showMenuBarIcon)
+                Toggle("Hide desktop icons while capturing", isOn: $settings.hideDesktopIconsWhileCapturing)
+                Toggle("Play sounds", isOn: $settings.playSounds)
+            }
+
+            settingsSectionCard(title: "Export Location", icon: "folder") {
+                HStack {
+                    Text(settings.exportLocationPath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Choose...") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        if panel.runModal() == .OK, let url = panel.url {
+                            settings.exportLocationURL = url
+                        }
                     }
                 }
             }
 
-            Divider()
-            Text("After Capture").font(.headline)
-            ForEach(AfterCaptureAction.allCases, id: \.self) { action in
-                Toggle(afterCaptureLabel(action), isOn: Binding(
-                    get: { settings.afterCaptureActions.contains(action) },
-                    set: { enabled in
-                        if enabled {
-                            if !settings.afterCaptureActions.contains(action) {
-                                settings.afterCaptureActions.append(action)
+            settingsSectionCard(title: "After Capture Actions", icon: "bolt") {
+                ForEach(AfterCaptureAction.allCases, id: \.self) { action in
+                    Toggle(afterCaptureLabel(action), isOn: Binding(
+                        get: { settings.afterCaptureActions.contains(action) },
+                        set: { enabled in
+                            if enabled {
+                                if !settings.afterCaptureActions.contains(action) {
+                                    settings.afterCaptureActions.append(action)
+                                }
+                            } else {
+                                settings.afterCaptureActions.removeAll { $0 == action }
                             }
-                        } else {
-                            settings.afterCaptureActions.removeAll { $0 == action }
                         }
-                    }
-                ))
+                    ))
+                }
             }
+
+            clipboardSettingsCard
         }
     }
 
@@ -290,63 +298,141 @@ public struct SettingsWindowView: View {
     }
 
     private var advancedTab: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Advanced").font(.title2.bold())
-            Toggle("Ask for name after every capture", isOn: $settings.askForNameAfterCapture)
-            HStack {
-                Text("File name format: \(settings.fileNameFormat)")
-                    .lineLimit(1)
-                Spacer()
-                Button("Customize...") {
-                    showFileNameBuilder = true
+
+            clipboardSettingsCard
+
+            settingsSectionCard(title: "Capture Output & Naming", icon: "doc.text") {
+                Toggle("Ask for name after every capture", isOn: $settings.askForNameAfterCapture)
+                HStack {
+                    Text("File name format: \(settings.fileNameFormat)")
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Customize...") {
+                        showFileNameBuilder = true
+                    }
+                }
+                Toggle("Add \"@2x\" suffix to Retina screenshots", isOn: $settings.add2xSuffixToRetina)
+
+                Picker("Copy to clipboard", selection: $settings.clipboardCopyMode) {
+                    Text("File & Image (default)").tag(ClipboardCopyMode.fileAndImage)
+                    Text("Image only").tag(ClipboardCopyMode.imageOnly)
+                    Text("File only").tag(ClipboardCopyMode.fileOnly)
+                }
+
+                Picker("Keep history", selection: $settings.keepHistoryDuration) {
+                    ForEach(HistoryRetentionDuration.allCases, id: \.self) { dur in
+                        Text(dur.displayName).tag(dur)
+                    }
                 }
             }
-            Toggle("Add \"@2x\" suffix to Retina screenshots", isOn: $settings.add2xSuffixToRetina)
 
-            Picker("Copy to clipboard", selection: $settings.clipboardCopyMode) {
-                Text("File & Image (default)").tag(ClipboardCopyMode.fileAndImage)
-                Text("Image only").tag(ClipboardCopyMode.imageOnly)
-                Text("File only").tag(ClipboardCopyMode.fileOnly)
+            settingsSectionCard(title: "Text Recognition (OCR)", icon: "text.viewfinder") {
+                TextField("Language (auto or ISO code e.g. en-US)", text: $settings.ocrLanguage)
+                    .textFieldStyle(.roundedBorder)
+                Toggle("Keep line breaks", isOn: $settings.ocrKeepLineBreaks)
+                Toggle("Detect links", isOn: $settings.ocrDetectLinks)
             }
 
-            Picker("Keep history", selection: $settings.keepHistoryDuration) {
-                ForEach(HistoryRetentionDuration.allCases, id: \.self) { dur in
-                    Text(dur.displayName).tag(dur)
-                }
+            settingsSectionCard(title: "All-In-One & Pinned Screenshots", icon: "pin") {
+                Toggle("Remember last selection", isOn: $settings.allInOneRememberLastSelection)
+                Toggle("Pinned: Rounded corners", isOn: $settings.pinnedRoundedCorners)
+                Toggle("Pinned: Shadow", isOn: $settings.pinnedShadow)
+                Toggle("Pinned: Border", isOn: $settings.pinnedBorder)
             }
 
-            Divider()
-            Text("Text Recognition").font(.headline)
-            TextField("Language (auto or ISO code e.g. en-US)", text: $settings.ocrLanguage)
-                .textFieldStyle(.roundedBorder)
-            Toggle("Keep line breaks", isOn: $settings.ocrKeepLineBreaks)
-            Toggle("Detect links", isOn: $settings.ocrDetectLinks)
-
-            Divider()
-            Text("All-In-One & Pinned Screenshots").font(.headline)
-            Toggle("Remember last selection", isOn: $settings.allInOneRememberLastSelection)
-            Toggle("Pinned: Rounded corners", isOn: $settings.pinnedRoundedCorners)
-            Toggle("Pinned: Shadow", isOn: $settings.pinnedShadow)
-            Toggle("Pinned: Border", isOn: $settings.pinnedBorder)
-
-            Divider()
-            Toggle("Allow URL scheme API (catch://)", isOn: $settings.allowURLSchemeAPI)
+            settingsSectionCard(title: "Automation", icon: "link") {
+                Toggle("Allow URL scheme API (catch://)", isOn: $settings.allowURLSchemeAPI)
+            }
         }
     }
 
     private var aboutTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Catch").font(.title.bold())
-            Text("Native macOS Screen Capture, Annotation, Background Tool, Scrolling Capture, OCR & Pinned Screenshot Suite.")
-                .foregroundStyle(.secondary)
-            Text("URL Scheme API: catch://")
-                .font(.caption.monospaced())
-            Button("Open Onboarding & Feature Tour...") {
-                OnboardingWindowController.shared.show()
+        VStack(alignment: .leading, spacing: 16) {
+            settingsSectionCard(title: "Catch Suite", icon: "camera.aperture") {
+                Text("Catch").font(.title.bold())
+                Text("Native macOS Screen Capture, Annotation, Background Tool, Scrolling Capture, OCR, Raycast-Grade Clipboard History & Pinned Screenshot Suite.")
+                    .foregroundStyle(.secondary)
+                Text("URL Scheme API: catch://")
+                    .font(.caption.monospaced())
+                    .padding(.top, 2)
+                HStack(spacing: 10) {
+                    Button("Open Onboarding & Feature Tour...") {
+                        OnboardingWindowController.shared.show()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Open Clipboard History (⌥⇧⌘V)") {
+                        ClipboardWindowController.shared.show()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.top, 6)
             }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, 6)
         }
+    }
+
+    private var clipboardSettingsCard: some View {
+        settingsSectionCard(title: "Raycast Clipboard History", icon: "doc.on.clipboard") {
+            HStack {
+                Text("\(clipboardStore.entries.count) items indexed in WAL SQLite3 + Trigram FTS5")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let clipboardClearedMessage {
+                    Text(clipboardClearedMessage)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(RaycastTheme.accent)
+                }
+            }
+
+            Toggle("Monitor system clipboard history", isOn: $settings.clipboardHistoryEnabled)
+            Toggle("Automatically extract OCR text from copied images", isOn: $settings.clipboardOCREnabled)
+            Stepper(
+                "Retain clipboard items: \(settings.clipboardRetentionDays) days",
+                value: $settings.clipboardRetentionDays,
+                in: 1...365,
+                step: 7
+            )
+
+            HStack(spacing: 10) {
+                Button("Open Clipboard History (⌥⇧⌘V)") {
+                    ClipboardWindowController.shared.show()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Clear Unpinned History", role: .destructive) {
+                    clipboardStore.clearAll(includePinned: false)
+                    clipboardClearedMessage = "Cleared unpinned items"
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func settingsSectionCard<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+        )
     }
 
     private func afterCaptureLabel(_ action: AfterCaptureAction) -> String {

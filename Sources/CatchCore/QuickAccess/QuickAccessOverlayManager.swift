@@ -236,48 +236,68 @@ private struct QuickAccessCardView: View {
             }
 
             HStack(spacing: 6) {
-                actionBtn(systemImage: "doc.on.doc", help: "Copy", action: copyAction)
-                actionBtn(systemImage: "square.and.arrow.down", help: "Save", action: saveAction)
-                actionBtn(systemImage: "pencil.tip.crop.circle", help: "Annotate", action: annotateAction)
-                actionBtn(systemImage: "pin", help: "Pin to Screen", action: pinAction)
-                actionBtn(systemImage: "icloud.and.arrow.up", help: "Upload to Cloud", action: uploadAction)
+                actionBtn(systemImage: "doc.on.doc", label: "Copy", help: "Copy to Clipboard", action: copyAction)
+                actionBtn(systemImage: "square.and.arrow.down", label: "Save", help: "Save to Disk", action: saveAction)
+                actionBtn(systemImage: "pencil.tip.crop.circle", label: "Edit", help: "Annotate", action: annotateAction)
+                actionBtn(systemImage: "pin", label: "Pin", help: "Pin to Screen", action: pinAction)
+                actionBtn(systemImage: "icloud.and.arrow.up", label: "Cloud", help: "Upload to Cloud", action: uploadAction)
             }
 
-            HStack {
+            HStack(spacing: 6) {
+                Text(card.result.format.rawValue.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(RaycastTheme.accent)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(RaycastTheme.accent.opacity(0.16)))
+
                 Text("\(card.result.image.width) × \(card.result.image.height)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(RaycastTheme.textSecondary)
+
                 Spacer()
                 if let uploadStatus {
                     Text(uploadStatus)
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.accent)
                 } else {
                     Text(ByteCountFormatter.string(fromByteCount: Int64(card.result.encodedData.count), countStyle: .file))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(RaycastTheme.textTertiary)
                 }
             }
         }
         .padding(10)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            ZStack {
+                RaycastVisualEffectBackground(cornerRadius: 14, tintAlpha: 0.84)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(RaycastTheme.windowBackground.opacity(0.45))
+            }
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                .strokeBorder(
+                    isHovering
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [RaycastTheme.accent.opacity(0.55), Color.white.opacity(0.18)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        : AnyShapeStyle(RaycastTheme.specularGradient),
+                    lineWidth: 1
+                )
         )
+        .shadow(color: Color.black.opacity(isHovering ? 0.55 : 0.35), radius: isHovering ? 16 : 10, x: 0, y: 6)
+        .scaleEffect(isHovering ? 1.015 : 1.0)
+        .animation(RaycastTheme.microSpring, value: isHovering)
         .onHover { hovering in
             isHovering = hovering
         }
     }
 
-    private func actionBtn(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .frame(maxWidth: .infinity, minHeight: 24)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .help(help)
+    private func actionBtn(systemImage: String, label: String, help: String, action: @escaping () -> Void) -> some View {
+        QuickAccessActionButton(systemImage: systemImage, label: label, help: help, action: action)
     }
 
     private func copyAction() {
@@ -390,5 +410,43 @@ public final class DraggableNSImageView: NSImageView, NSDraggingSource {
             items.append(dragItem)
         }
         beginDraggingSession(with: items, event: event, source: self)
+    }
+}
+
+private struct QuickAccessActionButton: View {
+    let systemImage: String
+    let label: String
+    let help: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 8.5, weight: .medium))
+            }
+            .foregroundStyle(isHovered ? RaycastTheme.textPrimary : RaycastTheme.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isHovered ? RaycastTheme.rowSelection : Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(isHovered ? Color.white.opacity(0.24) : Color.white.opacity(0.08), lineWidth: 0.75)
+                    )
+            )
+            .scaleEffect(isHovered ? 1.04 : 1.0)
+            .animation(RaycastTheme.microSpring, value: isHovered)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help(help)
     }
 }

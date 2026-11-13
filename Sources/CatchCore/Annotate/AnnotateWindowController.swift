@@ -287,22 +287,33 @@ public struct AnnotateEditorView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
+        .background(
+            ZStack {
+                RaycastTheme.panelSurface.opacity(0.55)
+                LinearGradient(
+                    colors: [Color.white.opacity(0.06), Color.clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(RaycastTheme.borderSubtle)
+                .frame(height: 1)
+        }
     }
 
     private func toolButton(_ kind: AnnotationToolKind, icon: String, label: String) -> some View {
-        Button {
-            viewModel.activeTool = kind
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: icon)
-                    .font(.system(size: 13))
-                Text(label)
-                    .font(.system(size: 9))
+        AnnotateToolButtonView(
+            icon: icon,
+            label: label,
+            isSelected: viewModel.activeTool == kind
+        ) {
+            withAnimation(RaycastTheme.microSpring) {
+                viewModel.activeTool = kind
             }
-            .frame(width: 46, height: 34)
-            .background(viewModel.activeTool == kind ? Color.accentColor.opacity(0.22) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
     }
 
     private var canvasArea: some View {
@@ -422,10 +433,24 @@ public struct AnnotateEditorView: View {
 
     private var bottomActionBar: some View {
         HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Text("\(viewModel.baseImage.width) × \(viewModel.baseImage.height)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(RaycastTheme.textSecondary)
+                Text("·")
+                    .foregroundStyle(RaycastTheme.textTertiary)
+                Text("\(viewModel.state.annotations.count) layers")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(RaycastTheme.textSecondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+
             if let status = viewModel.statusMessage {
                 Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(RaycastTheme.accent)
             }
             Spacer()
             Button("Save as .catch...") {
@@ -440,14 +465,19 @@ public struct AnnotateEditorView: View {
             Button("Pin") {
                 PinnedScreenshotController.shared.pin(image: viewModel.renderedComposite, title: viewModel.title)
             }
-            Button("Copy") {
+            Button {
                 let cg = viewModel.renderedComposite
                 let ns = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([ns])
                 viewModel.statusMessage = "Copied to clipboard"
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Copy")
+                    RaycastKeycapBadge("⌘C").scaleEffect(0.82)
+                }
             }
-            Button("Save") {
+            Button {
                 let cg = viewModel.renderedComposite
                 let data = ImagePostProcessor.encode(image: cg, format: SettingsStore.shared.outputFormat) ?? Data()
                 let res = CaptureResult(
@@ -461,6 +491,11 @@ public struct AnnotateEditorView: View {
                 if let url = CaptureEngine.shared.saveCapture(result: res, askDestination: false) {
                     viewModel.statusMessage = "Saved \(url.lastPathComponent)"
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Save")
+                    RaycastKeycapBadge("⌘S").scaleEffect(0.82)
+                }
             }
             Button("Upload to Cloud") {
                 let cg = viewModel.renderedComposite
@@ -471,9 +506,54 @@ public struct AnnotateEditorView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .tint(RaycastTheme.accent)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .background(RaycastTheme.panelSurface.opacity(0.65))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(RaycastTheme.borderSubtle)
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct AnnotateToolButtonView: View {
+    let icon: String
+    let label: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                Text(label)
+                    .font(.system(size: 9, weight: isSelected ? .semibold : .regular))
+            }
+            .foregroundStyle(isSelected ? RaycastTheme.accent : (isHovered ? RaycastTheme.textPrimary : RaycastTheme.textSecondary))
+            .frame(width: 48, height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isSelected ? RaycastTheme.accent.opacity(0.22) : (isHovered ? Color.white.opacity(0.08) : Color.clear))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(isSelected ? RaycastTheme.accent.opacity(0.55) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .scaleEffect(isHovered ? 1.04 : 1.0)
+            .animation(RaycastTheme.microSpring, value: isHovered)
+            .animation(RaycastTheme.microSpring, value: isSelected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 }
 

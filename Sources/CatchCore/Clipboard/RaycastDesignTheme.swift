@@ -35,16 +35,25 @@ public enum RaycastBinaryEvidence {
 public struct RaycastVisualEffectBackground: NSViewRepresentable {
     public var cornerRadius: CGFloat
     public var tintAlpha: CGFloat
+    public var material: NSVisualEffectView.Material
+    public var blendingMode: NSVisualEffectView.BlendingMode
 
-    public init(cornerRadius: CGFloat = RaycastTheme.windowCornerRadius, tintAlpha: CGFloat = 0.78) {
+    public init(
+        cornerRadius: CGFloat = RaycastTheme.windowCornerRadius,
+        tintAlpha: CGFloat = 0.78,
+        material: NSVisualEffectView.Material = .hudWindow,
+        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    ) {
         self.cornerRadius = cornerRadius
         self.tintAlpha = tintAlpha
+        self.material = material
+        self.blendingMode = blendingMode
     }
 
     public func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
+        view.material = material
+        view.blendingMode = blendingMode
         view.state = .active
         view.appearance = NSAppearance(named: .darkAqua)
         view.wantsLayer = true
@@ -96,6 +105,20 @@ public enum RaycastTheme {
     public static let windowCornerRadius: CGFloat = 16
     public static let rowCornerRadius: CGFloat = 8
     public static let iconCornerRadius: CGFloat = 6
+
+    // MARK: - Spring Physics & Liquid Glass Tokens
+    public static let microSpring = Animation.spring(response: 0.22, dampingFraction: 0.78, blendDuration: 0)
+    public static let snappySpring = Animation.spring(response: 0.28, dampingFraction: 0.82, blendDuration: 0)
+
+    public static let specularGradient = LinearGradient(
+        colors: [
+            Color.white.opacity(0.28),
+            Color.white.opacity(0.08),
+            Color.white.opacity(0.14)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     public static func color(for tagColor: ClipboardTagColor) -> Color {
         switch tagColor {
@@ -239,6 +262,122 @@ public struct RaycastActionBar<TrailingContent: View>: View {
             Rectangle()
                 .fill(RaycastTheme.borderSubtle)
                 .frame(height: 1)
+        }
+    }
+}
+
+/// Liquid Glass surface modifier combining `RaycastVisualEffectBackground`,
+/// semantic top-edge specular gradient rim lighting, and multi-layer elevation shadow.
+public struct RaycastLiquidGlassSurface: ViewModifier {
+    public var cornerRadius: CGFloat
+    public var tintAlpha: CGFloat
+    public var material: NSVisualEffectView.Material
+    public var isElevated: Bool
+
+    public init(
+        cornerRadius: CGFloat = RaycastTheme.windowCornerRadius,
+        tintAlpha: CGFloat = 0.80,
+        material: NSVisualEffectView.Material = .hudWindow,
+        isElevated: Bool = true
+    ) {
+        self.cornerRadius = cornerRadius
+        self.tintAlpha = tintAlpha
+        self.material = material
+        self.isElevated = isElevated
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .background(
+                RaycastVisualEffectBackground(
+                    cornerRadius: cornerRadius,
+                    tintAlpha: tintAlpha,
+                    material: material
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
+            )
+            .shadow(
+                color: Color.black.opacity(isElevated ? 0.45 : 0.22),
+                radius: isElevated ? 18 : 8,
+                x: 0,
+                y: isElevated ? 10 : 4
+            )
+    }
+}
+
+public extension View {
+    func raycastLiquidGlass(
+        cornerRadius: CGFloat = RaycastTheme.windowCornerRadius,
+        tintAlpha: CGFloat = 0.80,
+        material: NSVisualEffectView.Material = .hudWindow,
+        isElevated: Bool = true
+    ) -> some View {
+        modifier(
+            RaycastLiquidGlassSurface(
+                cornerRadius: cornerRadius,
+                tintAlpha: tintAlpha,
+                material: material,
+                isElevated: isElevated
+            )
+        )
+    }
+}
+
+/// Tactile smoked-glass interactive tile with spring hover/press physics and specular border highlight.
+public struct RaycastInteractiveTile<Content: View>: View {
+    public let cornerRadius: CGFloat
+    public let action: () -> Void
+    @ViewBuilder public let content: () -> Content
+
+    @State private var isHovered = false
+    @State private var isPressed = false
+
+    public init(
+        cornerRadius: CGFloat = RaycastTheme.rowCornerRadius,
+        action: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.cornerRadius = cornerRadius
+        self.action = action
+        self.content = content
+    }
+
+    public var body: some View {
+        Button {
+            withAnimation(RaycastTheme.microSpring) {
+                isPressed = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                withAnimation(RaycastTheme.microSpring) {
+                    isPressed = false
+                }
+            }
+            action()
+        } label: {
+            content()
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(isHovered ? Color.white.opacity(0.11) : Color.white.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            isHovered ? AnyShapeStyle(RaycastTheme.specularGradient) : AnyShapeStyle(Color.white.opacity(0.08)),
+                            lineWidth: 0.75
+                        )
+                )
+                .scaleEffect(isPressed ? 0.95 : (isHovered ? 1.03 : 1.0))
+                .animation(RaycastTheme.microSpring, value: isHovered)
+                .animation(RaycastTheme.microSpring, value: isPressed)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
         }
     }
 }
