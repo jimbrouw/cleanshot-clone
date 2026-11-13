@@ -243,4 +243,29 @@ final class CleanShotCloneTests: XCTestCase {
         XCTAssertNotNil(comment)
         XCTAssertEqual(cloud.item(forShareID: uploaded!.id)?.comments.count, 1)
     }
+
+    func testOnboardingAndPermissionsManager() {
+        XCTAssertEqual(
+            URLSchemeRouter.parse(url: URL(string: "cleanshot://open-onboarding")!),
+            .openOnboarding
+        )
+        XCTAssertEqual(
+            URLSchemeRouter.parse(url: URL(string: "cleanshotclone://open-onboarding")!),
+            .openOnboarding
+        )
+
+        let defaults = UserDefaults(suiteName: "CleanShotOnboardingTest-\(UUID().uuidString)")!
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.hasCompletedOnboarding)
+        store.hasCompletedOnboarding = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).hasCompletedOnboarding)
+
+        let manager = SystemPermissionsManager()
+        manager.refreshStatus()
+        // Smoke-check querying live system state never crashes under headless test runner
+        _ = manager.hasScreenRecording
+        _ = manager.hasAccessibility
+        _ = SystemPermissionsManager.macOSScreenshotHotkeyIDs
+        XCTAssertEqual(SystemPermissionsManager.macOSScreenshotHotkeyIDs, ["28", "29", "30", "31", "184"])
+    }
 }

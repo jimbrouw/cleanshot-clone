@@ -8,6 +8,7 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKeyRefs: [EventHotKeyRef] = []
     private var hotKeyHandlers: [UInt32: () -> Void] = [:]
+    private var isHotKeyHandlerInstalled = false
 
     public static func run() {
         let app = NSApplication.shared
@@ -19,8 +20,32 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         registerAppleEventHandler()
         setupMenuBar()
-        registerGlobalHotkeys()
+        reregisterHotkeys()
+        NotificationCenter.default.addObserver(forName: .cleanShotHotkeysShouldReload, object: nil, queue: .main) { [weak self] _ in
+            self?.reregisterHotkeys()
+        }
         _ = HistoryStore.shared.pruneExpiredItems(retention: SettingsStore.shared.keepHistoryDuration)
+
+        SystemPermissionsManager.shared.refreshStatus()
+        if !SettingsStore.shared.hasCompletedOnboarding
+            || !SystemPermissionsManager.shared.hasScreenRecording
+            || !SystemPermissionsManager.shared.hasAccessibility {
+            DispatchQueue.main.async {
+                OnboardingWindowController.shared.show()
+            }
+        }
+    }
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        SystemPermissionsManager.shared.refreshStatus()
+        if !SettingsStore.shared.hasCompletedOnboarding
+            || !SystemPermissionsManager.shared.hasScreenRecording
+            || !SystemPermissionsManager.shared.hasAccessibility {
+            OnboardingWindowController.shared.show()
+        } else if !flag {
+            AllInOneHUDController.shared.show()
+        }
+        return true
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
@@ -60,6 +85,8 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.addItem(makeItem("Onboarding & Feature Tour...", action: #selector(cmdOpenOnboarding), key: ""))
+        menu.addItem(.separator())
         menu.addItem(makeItem("All-In-One", action: #selector(cmdAllInOne), key: "5"))
         menu.addItem(.separator())
         menu.addItem(makeItem("Capture Area", action: #selector(cmdCaptureArea), key: "4"))
@@ -107,6 +134,7 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
     @objc private func cmdRestoreLast() { QuickAccessOverlayManager.shared.restoreRecentlyClosed() }
     @objc private func cmdToggleDesktopIcons() { DesktopIconsManager.shared.toggleDesktopIcons() }
     @objc private func cmdToggleQuickAccess() { QuickAccessOverlayManager.shared.toggleTemporarilyHide() }
+    @objc private func cmdOpenOnboarding() { OnboardingWindowController.shared.show() }
     @objc private func cmdOpenSettings() { SettingsWindowController.shared.show() }
     @objc private func cmdQuit() { NSApp.terminate(nil) }
 
@@ -126,25 +154,67 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func registerGlobalHotkeys() {
-        var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, userData -> OSStatus in
-            guard let userData, let event else { return noErr }
-            var hkID = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hkID)
-            let runner = Unmanaged<CleanShotAppRunner>.fromOpaque(userData).takeUnretainedValue()
-            runner.hotKeyHandlers[hkID.id]?()
-            return noErr
-        }, 1, &eventSpec, Unmanaged.passUnretained(self).toOpaque(), nil)
+    public func reregisterHotkeys() {
+        for ref in hotKeyRefs {
+            UnregisterEventHotKey(ref)
+        }
+        hotKeyRefs.removeAll()
+        hotKeyHandlers.removeAll()
+        registerGlobalHotkeys()
+    }
 
+    private func registerGlobalHotkeys() {
+        if !isHotKeyHandlerInstalled {
+            var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, userData -> OSStatus in
+                guard let userData, let event else { return noErr }
+                var hkID = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+                let runner = Unmanaged<CleanShotAppRunner>.fromOpaque(userData).takeUnretainedValue()
+                runner.hotKeyHandlers[hkID.id]?()
+                return noErr
+            }, 1, &eventSpec, Unmanaged.passUnretained(self).toOpaque(), nil)
+            isHotKeyHandlerInstalled = true
+        }
+
+        // Standard shortcuts (active immediately once macOS system screenshot shortcuts are disabled)
         registerHotKey(id: 1, keyCode: UInt32(kVK_ANSI_5), modifiers: UInt32(cmdKey | shiftKey)) {
             AllInOneHUDController.shared.show()
         }
-        registerHotKey(id: 2, keyCode: UInt32(kVK_ANSI_4), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+        registerHotKey(id: 2, keyCode: UInt32(kVK_ANSI_4), modifiers: UInt32(cmdKey | shiftKey)) {
             CaptureEngine.shared.captureArea()
         }
-        registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+        registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_3), modifiers: UInt32(cmdKey | shiftKey)) {
+            CaptureEngine.shared.captureFullscreen()
+        }
+        registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | shiftKey)) {
             OCRService.shared.captureTextFromScreen()
+        }
+
+        // Conflict-free Option+Shift+Cmd shortcuts (always work alongside macOS defaults)
+        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_5), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            AllInOneHUDController.shared.show()
+        }
+        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_4), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            CaptureEngine.shared.captureArea()
+        }
+        registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_3), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            CaptureEngine.shared.captureFullscreen()
+        }
+        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_W), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            CaptureEngine.shared.captureWindow()
+        }
+        registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            ScrollingCaptureController.shared.beginScrollingCapture()
+        }
+        registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            OCRService.shared.captureTextFromScreen()
+        }
+        registerHotKey(id: 16, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            HistoryWindowController.shared.show()
+        }
+        registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey | optionKey)) { [weak self] in
+            self?.openFileForAnnotate()
         }
     }
 

@@ -216,6 +216,7 @@ public final class SettingsStore: ObservableObject {
     @Published public var pinnedShadow: Bool { didSet { save("pinnedShadow", pinnedShadow) } }
     @Published public var pinnedBorder: Bool { didSet { save("pinnedBorder", pinnedBorder) } }
     @Published public var allowURLSchemeAPI: Bool { didSet { save("allowURLSchemeAPI", allowURLSchemeAPI) } }
+    @Published public var hasCompletedOnboarding: Bool { didSet { save("hasCompletedOnboarding", hasCompletedOnboarding) } }
 
     public var exportLocationURL: URL {
         get { URL(fileURLWithPath: exportLocationPath, isDirectory: true) }
@@ -303,6 +304,7 @@ public final class SettingsStore: ObservableObject {
         self.pinnedShadow = defaults.object(forKey: keyPrefix + "pinnedShadow") as? Bool ?? true
         self.pinnedBorder = defaults.object(forKey: keyPrefix + "pinnedBorder") as? Bool ?? false
         self.allowURLSchemeAPI = defaults.object(forKey: keyPrefix + "allowURLSchemeAPI") as? Bool ?? true
+        self.hasCompletedOnboarding = defaults.object(forKey: keyPrefix + "hasCompletedOnboarding") as? Bool ?? false
     }
 
     public static func defaultColors() -> [ColorSwatch] {

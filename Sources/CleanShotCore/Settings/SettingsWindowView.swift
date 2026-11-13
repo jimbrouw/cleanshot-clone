@@ -341,6 +341,11 @@ public struct SettingsWindowView: View {
                 .foregroundStyle(.secondary)
             Text("URL Scheme API: cleanshot:// & cleanshotclone://")
                 .font(.caption.monospaced())
+            Button("Open Onboarding & Feature Tour...") {
+                OnboardingWindowController.shared.show()
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 6)
         }
     }
 

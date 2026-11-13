@@ -21,6 +21,7 @@ public enum URLCommand: Equatable, Sendable {
     case openHistory
     case restoreRecentlyClosed
     case openSettings(tab: SettingsTab?)
+    case openOnboarding
 }
 
 public enum URLSchemeRouter {
@@ -95,6 +96,8 @@ public enum URLSchemeRouter {
         case "open-settings":
             let tab = params["tab"].flatMap { SettingsTab(rawValue: $0.lowercased()) }
             return .openSettings(tab: tab)
+        case "open-onboarding":
+            return .openOnboarding
         default:
             return nil
         }
@@ -160,6 +163,8 @@ public enum URLSchemeRouter {
             QuickAccessOverlayManager.shared.restoreRecentlyClosed()
         case .openSettings(let tab):
             SettingsWindowController.shared.show(tab: tab ?? .general)
+        case .openOnboarding:
+            OnboardingWindowController.shared.show()
         }
         return true
     }
