@@ -422,3 +422,92 @@ public struct WorkflowStageAnimationView: View {
         }
     }
 }
+
+/// Stage 5 Animation: Raycast-style Smoked-Glass Clipboard History master-detail & Sequential Paste preview.
+public struct ClipboardStageAnimationView: View {
+    public init() {}
+
+    public var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let cycle = t.truncatingRemainder(dividingBy: 4.5) / 4.5
+            let selectedIdx = cycle < 0.33 ? 0 : (cycle < 0.66 ? 1 : 2)
+            let pastePulse = max(0, sin(cycle * .pi * 6))
+
+            Canvas { ctx, size in
+                let stage = CGRect(x: 16, y: 12, width: size.width - 32, height: size.height - 24)
+                // Smoked-glass Raycast window shell
+                ctx.fill(RoundedRectangle(cornerRadius: 14).path(in: stage), with: .color(Color(red: 0.08, green: 0.08, blue: 0.10)))
+                ctx.stroke(RoundedRectangle(cornerRadius: 14).path(in: stage), with: .color(Color.white.opacity(0.16)), lineWidth: 1)
+
+                // Top Raycast search bar
+                let searchRect = CGRect(x: stage.minX + 12, y: stage.minY + 10, width: stage.width - 24, height: 28)
+                ctx.fill(RoundedRectangle(cornerRadius: 8).path(in: searchRect), with: .color(Color.white.opacity(0.06)))
+                ctx.draw(Image(systemName: "magnifyingglass"), at: CGPoint(x: searchRect.minX + 14, y: searchRect.midY))
+                ctx.draw(Text("Search clipboard history...").font(.system(size: 11)).foregroundColor(.white.opacity(0.55)), at: CGPoint(x: searchRect.minX + 96, y: searchRect.midY))
+
+                let pillRect = CGRect(x: searchRect.maxX - 96, y: searchRect.minY + 5, width: 88, height: 18)
+                ctx.fill(RoundedRectangle(cornerRadius: 5).path(in: pillRect), with: .color(Color(red: 1.0, green: 0.39, blue: 0.39).opacity(0.22)))
+                ctx.draw(Text("Filter by Type").font(.system(size: 9.5, weight: .semibold)).foregroundColor(Color(red: 1.0, green: 0.55, blue: 0.55)), at: CGPoint(x: pillRect.midX, y: pillRect.midY))
+
+                // Master list (Left 44%)
+                let listX = stage.minX + 12
+                let listW = (stage.width - 36) * 0.44
+                let items: [(String, String, Color)] = [
+                    ("eyedropper", "#FF6363", Color(red: 1.0, green: 0.39, blue: 0.39)),
+                    ("photo", "CleanShot 2026-11.png", .blue),
+                    ("curlybraces", "{\"status\":\"ok\"}", .green)
+                ]
+                for (i, item) in items.enumerated() {
+                    let rowY = searchRect.maxY + 12 + CGFloat(i) * 44
+                    let rowRect = CGRect(x: listX, y: rowY, width: listW, height: 38)
+                    let isSel = (i == selectedIdx)
+                    ctx.fill(
+                        RoundedRectangle(cornerRadius: 8).path(in: rowRect),
+                        with: .color(isSel ? Color.white.opacity(0.14) : Color.white.opacity(0.03))
+                    )
+                    if isSel {
+                        ctx.stroke(RoundedRectangle(cornerRadius: 8).path(in: rowRect), with: .color(Color.white.opacity(0.22)), lineWidth: 1)
+                    }
+                    let iconBox = CGRect(x: rowRect.minX + 8, y: rowRect.midY - 10, width: 20, height: 20)
+                    ctx.fill(RoundedRectangle(cornerRadius: 5).path(in: iconBox), with: .color(item.2.opacity(0.28)))
+                    ctx.draw(Image(systemName: item.0), at: CGPoint(x: iconBox.midX, y: iconBox.midY))
+                    ctx.draw(
+                        Text(item.1).font(.system(size: 11, weight: isSel ? .semibold : .regular)).foregroundColor(.white),
+                        at: CGPoint(x: iconBox.maxX + 64, y: rowRect.midY)
+                    )
+                }
+
+                // Detail preview pane (Right 56%)
+                let detailX = listX + listW + 12
+                let detailW = stage.maxX - 12 - detailX
+                let detailRect = CGRect(x: detailX, y: searchRect.maxY + 12, width: detailW, height: stage.height - 84)
+                ctx.fill(RoundedRectangle(cornerRadius: 10).path(in: detailRect), with: .color(Color.white.opacity(0.05)))
+                ctx.stroke(RoundedRectangle(cornerRadius: 10).path(in: detailRect), with: .color(Color.white.opacity(0.10)), lineWidth: 1)
+
+                if selectedIdx == 0 {
+                    let swatch = CGRect(x: detailRect.midX - 24, y: detailRect.minY + 18, width: 48, height: 48)
+                    ctx.fill(RoundedRectangle(cornerRadius: 12).path(in: swatch), with: .color(Color(red: 1.0, green: 0.39, blue: 0.39)))
+                    ctx.draw(Text("#FF6363  •  rgb(255, 99, 99)").font(.system(size: 10.5, weight: .bold, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: detailRect.midX, y: swatch.maxY + 18))
+                    ctx.draw(Text("Color Swatch + HSL/SwiftUI").font(.system(size: 9.5)).foregroundColor(.white.opacity(0.55)), at: CGPoint(x: detailRect.midX, y: swatch.maxY + 34))
+                } else if selectedIdx == 1 {
+                    let imgRect = CGRect(x: detailRect.minX + 18, y: detailRect.minY + 14, width: detailRect.width - 36, height: 64)
+                    ctx.fill(RoundedRectangle(cornerRadius: 8).path(in: imgRect), with: .color(Color.blue.opacity(0.25)))
+                    ctx.draw(Image(systemName: "viewfinder"), at: CGPoint(x: imgRect.midX, y: imgRect.midY))
+                    let ocrBadge = CGRect(x: detailRect.midX - 66, y: imgRect.maxY + 10, width: 132, height: 20)
+                    ctx.fill(RoundedRectangle(cornerRadius: 10).path(in: ocrBadge), with: .color(Color.purple.opacity(0.32)))
+                    ctx.draw(Text("OCR Text + Annotate").font(.system(size: 9.5, weight: .bold)).foregroundColor(.white), at: CGPoint(x: ocrBadge.midX, y: ocrBadge.midY))
+                } else {
+                    let codeRect = CGRect(x: detailRect.minX + 16, y: detailRect.minY + 14, width: detailRect.width - 32, height: 64)
+                    ctx.fill(RoundedRectangle(cornerRadius: 8).path(in: codeRect), with: .color(Color.black.opacity(0.35)))
+                    ctx.draw(Text("{\n  \"status\": \"ok\"\n}").font(.system(size: 10.5, design: .monospaced)).foregroundColor(.green), at: CGPoint(x: codeRect.midX, y: codeRect.midY))
+                    ctx.draw(Text("Auto-Formatted JSON").font(.system(size: 9.5)).foregroundColor(.white.opacity(0.55)), at: CGPoint(x: detailRect.midX, y: codeRect.maxY + 16))
+                }
+
+                // Bottom Raycast action bar hint
+                let footerRect = CGRect(x: stage.minX + 12, y: stage.maxY - 24, width: stage.width - 24, height: 18)
+                ctx.draw(Text("⌥⇧⌘V Open History   •   ⌃⇧⌘V Paste Sequentially   •   ⌘K Actions").font(.system(size: 9.5, weight: .medium)).foregroundColor(.white.opacity(0.55 + 0.35 * pastePulse)), at: CGPoint(x: footerRect.midX, y: footerRect.midY))
+            }
+        }
+    }
+}

@@ -25,6 +25,10 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
             self?.reregisterHotkeys()
         }
         _ = HistoryStore.shared.pruneExpiredItems(retention: SettingsStore.shared.keepHistoryDuration)
+        if SettingsStore.shared.clipboardHistoryEnabled {
+            ClipboardHistoryStore.shared.pruneExpired(days: SettingsStore.shared.clipboardRetentionDays)
+            ClipboardHistoryStore.shared.startMonitoring()
+        }
 
         SystemPermissionsManager.shared.refreshStatus()
         if !SettingsStore.shared.hasCompletedOnboarding
@@ -102,6 +106,9 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("Pin Screenshot...", action: #selector(cmdPinFile), key: ""))
         menu.addItem(makeItem("Unlock All Pinned Screenshots", action: #selector(cmdUnlockPinned), key: ""))
         menu.addItem(.separator())
+        menu.addItem(makeItem("Clipboard History (Raycast Style)...", action: #selector(cmdOpenClipboardHistory), key: ""))
+        menu.addItem(makeItem("Paste Sequentially", action: #selector(cmdPasteSequential), key: ""))
+        menu.addItem(.separator())
         menu.addItem(makeItem("Capture History", action: #selector(cmdOpenHistory), key: ""))
         menu.addItem(makeItem("Restore Last Capture", action: #selector(cmdRestoreLast), key: ""))
         menu.addItem(makeItem("Toggle Desktop Icons", action: #selector(cmdToggleDesktopIcons), key: ""))
@@ -130,6 +137,8 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
     @objc private func cmdOpenFromClipboard() { AnnotateWindowController.openFromClipboard() }
     @objc private func cmdPinFile() { openFileForPin() }
     @objc private func cmdUnlockPinned() { PinnedScreenshotController.shared.unlockAll() }
+    @objc private func cmdOpenClipboardHistory() { ClipboardWindowController.shared.show() }
+    @objc private func cmdPasteSequential() { _ = ClipboardHistoryStore.shared.pasteNextSequential() }
     @objc private func cmdOpenHistory() { HistoryWindowController.shared.show() }
     @objc private func cmdRestoreLast() { QuickAccessOverlayManager.shared.restoreRecentlyClosed() }
     @objc private func cmdToggleDesktopIcons() { DesktopIconsManager.shared.toggleDesktopIcons() }
@@ -215,6 +224,12 @@ public final class CleanShotAppRunner: NSObject, NSApplicationDelegate {
         }
         registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey | optionKey)) { [weak self] in
             self?.openFileForAnnotate()
+        }
+        registerHotKey(id: 18, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            ClipboardWindowController.shared.toggle()
+        }
+        registerHotKey(id: 19, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey | controlKey)) {
+            _ = ClipboardHistoryStore.shared.pasteNextSequential()
         }
     }
 

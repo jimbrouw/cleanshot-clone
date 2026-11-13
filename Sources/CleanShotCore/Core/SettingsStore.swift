@@ -217,6 +217,9 @@ public final class SettingsStore: ObservableObject {
     @Published public var pinnedBorder: Bool { didSet { save("pinnedBorder", pinnedBorder) } }
     @Published public var allowURLSchemeAPI: Bool { didSet { save("allowURLSchemeAPI", allowURLSchemeAPI) } }
     @Published public var hasCompletedOnboarding: Bool { didSet { save("hasCompletedOnboarding", hasCompletedOnboarding) } }
+    @Published public var clipboardHistoryEnabled: Bool { didSet { save("clipboardHistoryEnabled", clipboardHistoryEnabled) } }
+    @Published public var clipboardOCREnabled: Bool { didSet { save("clipboardOCREnabled", clipboardOCREnabled) } }
+    @Published public var clipboardRetentionDays: Int { didSet { save("clipboardRetentionDays", clipboardRetentionDays) } }
 
     public var exportLocationURL: URL {
         get { URL(fileURLWithPath: exportLocationPath, isDirectory: true) }
@@ -305,6 +308,9 @@ public final class SettingsStore: ObservableObject {
         self.pinnedBorder = defaults.object(forKey: keyPrefix + "pinnedBorder") as? Bool ?? false
         self.allowURLSchemeAPI = defaults.object(forKey: keyPrefix + "allowURLSchemeAPI") as? Bool ?? true
         self.hasCompletedOnboarding = defaults.object(forKey: keyPrefix + "hasCompletedOnboarding") as? Bool ?? false
+        self.clipboardHistoryEnabled = defaults.object(forKey: keyPrefix + "clipboardHistoryEnabled") as? Bool ?? true
+        self.clipboardOCREnabled = defaults.object(forKey: keyPrefix + "clipboardOCREnabled") as? Bool ?? true
+        self.clipboardRetentionDays = defaults.object(forKey: keyPrefix + "clipboardRetentionDays") as? Int ?? 7
     }
 
     public static func defaultColors() -> [ColorSwatch] {

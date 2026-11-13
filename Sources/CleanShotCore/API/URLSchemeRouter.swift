@@ -22,6 +22,8 @@ public enum URLCommand: Equatable, Sendable {
     case restoreRecentlyClosed
     case openSettings(tab: SettingsTab?)
     case openOnboarding
+    case openClipboard
+    case pasteSequential
 }
 
 public enum URLSchemeRouter {
@@ -98,6 +100,10 @@ public enum URLSchemeRouter {
             return .openSettings(tab: tab)
         case "open-onboarding":
             return .openOnboarding
+        case "open-clipboard":
+            return .openClipboard
+        case "paste-sequential":
+            return .pasteSequential
         default:
             return nil
         }
@@ -165,6 +171,10 @@ public enum URLSchemeRouter {
             SettingsWindowController.shared.show(tab: tab ?? .general)
         case .openOnboarding:
             OnboardingWindowController.shared.show()
+        case .openClipboard:
+            ClipboardWindowController.shared.show()
+        case .pasteSequential:
+            _ = ClipboardHistoryStore.shared.pasteNextSequential()
         }
         return true
     }

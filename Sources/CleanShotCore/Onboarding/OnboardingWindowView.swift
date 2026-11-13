@@ -55,6 +55,7 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
     case shortcuts
     case captureModes
     case annotate
+    case clipboard
     case workflow
 
     public var id: Int { rawValue }
@@ -65,6 +66,7 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
         case .shortcuts: return "Shortcuts"
         case .captureModes: return "Capture"
         case .annotate: return "Annotate"
+        case .clipboard: return "Clipboard"
         case .workflow: return "OCR & Pin"
         }
     }
@@ -75,6 +77,7 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
         case .shortcuts: return "Stop the macOS Screenshot Conflict"
         case .captureModes: return "Every Capture Mode in One HUD"
         case .annotate: return "Annotate, Beautify & Redact Instantly"
+        case .clipboard: return "Raycast-Style Clipboard History & Sequential Paste"
         case .workflow: return "OCR Text Capture, Floating Pins & Quick Access"
         }
     }
@@ -89,6 +92,8 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
             return "Capture an Area with pixel crosshair, snap clean Windows, capture full Scrolling pages, or open the All-In-One HUD."
         case .annotate:
             return "Drop gradient wallpapers with rounded corners and shadows, draw crisp arrows and counters, and pixelate secrets."
+        case .clipboard:
+            return "Search copied text, screenshots, links, colors, and files in a dark smoked-glass Raycast palette with OCR, QR decoding, and Sequential Paste."
         case .workflow:
             return "Extract selectable text from any screen region with on-device Vision OCR or pin references above every window."
         }
@@ -208,6 +213,8 @@ public struct OnboardingWizardView: View {
             CaptureModesStageAnimationView()
         case .annotate:
             AnnotateStageAnimationView()
+        case .clipboard:
+            ClipboardStageAnimationView()
         case .workflow:
             WorkflowStageAnimationView()
         }
@@ -224,6 +231,8 @@ public struct OnboardingWizardView: View {
             captureModesPanel
         case .annotate:
             annotatePanel
+        case .clipboard:
+            clipboardPanel
         case .workflow:
             workflowPanel
         }
@@ -429,6 +438,29 @@ public struct OnboardingWizardView: View {
                     )
                 ]
                 AnnotateWindowController.open(image: sample, title: "CleanShot Interactive Tour", state: state)
+            }
+        }
+    }
+
+    private var clipboardPanel: some View {
+        HStack(spacing: 14) {
+            demoActionTile(
+                icon: "doc.on.clipboard",
+                title: "Raycast Clipboard History (⌥⇧⌘V)",
+                caption: "Smoked-glass master-detail search for text, images, files, links, emails, and hex/RGB colors with OCR & QR decode.",
+                buttonTitle: "Try Raycast Clipboard History"
+            ) {
+                ClipboardWindowController.shared.show()
+            }
+            demoActionTile(
+                icon: "list.number",
+                title: "Sequential Paste (⌃⇧⌘V)",
+                caption: "Copy several fields in a row, then tap Sequential Paste to step through and paste each item in order.",
+                buttonTitle: "Seed & Preview"
+            ) {
+                _ = ClipboardHistoryStore.shared.recordText("#FF6363", sourceAppName: "Raycast Tour")
+                _ = ClipboardHistoryStore.shared.recordText("https://cleanshot.com/screenshots", sourceAppName: "Raycast Tour")
+                ClipboardWindowController.shared.show()
             }
         }
     }

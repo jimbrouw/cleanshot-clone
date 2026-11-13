@@ -268,4 +268,65 @@ final class CleanShotCloneTests: XCTestCase {
         _ = SystemPermissionsManager.macOSScreenshotHotkeyIDs
         XCTAssertEqual(SystemPermissionsManager.macOSScreenshotHotkeyIDs, ["28", "29", "30", "31", "184"])
     }
+
+    func testRaycastClipboardHistoryStoreAndDetectors() {
+        // 1. URL scheme routing for clipboard actions
+        XCTAssertEqual(
+            URLSchemeRouter.parse(url: URL(string: "cleanshot://open-clipboard")!),
+            .openClipboard
+        )
+        XCTAssertEqual(
+            URLSchemeRouter.parse(url: URL(string: "cleanshotclone://paste-sequential")!),
+            .pasteSequential
+        )
+
+        // 2. Smart detectors: Color hex + conversions, Links, Emails, JSON
+        let colorDetect = ClipboardSmartDetector.detectCategories(for: "#FF6363")
+        XCTAssertTrue(colorDetect.categories.contains(.color))
+        XCTAssertEqual(colorDetect.normalizedHex, "#FF6363")
+
+        let formats = Dictionary(uniqueKeysWithValues: ClipboardSmartDetector.colorFormats(fromHex: "#FF6363").map { ($0.label, $0.value) })
+        XCTAssertEqual(formats["RGB"], "rgb(255, 99, 99)")
+        XCTAssertEqual(formats["HSL"], "hsl(0, 100%, 69%)")
+
+        XCTAssertTrue(ClipboardSmartDetector.detectCategories(for: "https://cleanshot.com/screenshots").categories.contains(.link))
+        XCTAssertTrue(ClipboardSmartDetector.detectCategories(for: "team@raycast.com").categories.contains(.email))
+        let formattedJSON = ClipboardSmartDetector.prettyPrintedJSON(from: #"{"b":1,"a":2}"#)
+        XCTAssertNotNil(formattedJSON)
+        XCTAssertTrue(formattedJSON!.contains("\n"))
+
+        // 3. Persistent ClipboardHistoryStore lifecycle: record, dedup, pin, tag, filter, sequential paste
+        let suiteName = "CleanShotClipboardTest-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clipboard-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempFile) }
+
+        let store = ClipboardHistoryStore(storageURL: tempFile, defaults: defaults)
+        let first = store.recordText("First snippet", sourceAppName: "Xcode")
+        let duplicate = store.recordText("First snippet", sourceAppName: "Xcode")
+        XCTAssertEqual(first.id, duplicate.id)
+        XCTAssertEqual(duplicate.copyCount, 2)
+
+        let second = store.recordText("#FF6363", sourceAppName: "Figma")
+        let third = store.recordText("https://raycast.com", sourceAppName: "Safari")
+        XCTAssertEqual(store.entries.count, 3)
+
+        // Pin & Tag
+        store.togglePin(id: first.id)
+        store.addTag(id: second.id, tag: "brand")
+        XCTAssertEqual(store.filteredEntries(query: "", category: .color).map(\.id), [second.id])
+        XCTAssertEqual(store.filteredEntries(query: "", category: .all, tag: "brand").map(\.id), [second.id])
+
+        // Sequential paste without synthesizing CGEvent (pinned entries sort first in `entries`)
+        let seq1 = store.pasteNextSequential(synthesizePaste: false)
+        let seq2 = store.pasteNextSequential(synthesizePaste: false)
+        XCTAssertNotNil(seq1)
+        XCTAssertNotNil(seq2)
+        XCTAssertEqual(seq1?.id, first.id)
+        XCTAssertEqual(seq2?.id, third.id)
+        store.resetSequentialPaste()
+        let seqReset = store.pasteNextSequential(synthesizePaste: false)
+        XCTAssertEqual(seqReset?.id, first.id)
+    }
 }

@@ -16,8 +16,8 @@ public final class AllInOneHUDController {
             }
 
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: displayIndex)
-            let width: CGFloat = 680
-            let height: CGFloat = 92
+            let width: CGFloat = 760
+            let height: CGFloat = 96
             let frame = CGRect(
                 x: screen.frame.midX - width / 2,
                 y: screen.frame.minY + 110,
@@ -68,32 +68,32 @@ private struct AllInOneHUDView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            hudButton("Area", systemImage: "viewfinder") {
+            hudButton("Area", systemImage: "viewfinder", shortcut: "⌥4") {
                 onDismiss()
                 CaptureEngine.shared.captureArea()
             }
-            hudButton("Fullscreen", systemImage: "macwindow.on.rectangle") {
+            hudButton("Fullscreen", systemImage: "macwindow.on.rectangle", shortcut: "⌥3") {
                 onDismiss()
                 CaptureEngine.shared.captureFullscreen()
             }
-            hudButton("Window", systemImage: "macwindow") {
+            hudButton("Window", systemImage: "macwindow", shortcut: "⌥W") {
                 onDismiss()
                 CaptureEngine.shared.captureWindow()
             }
-            hudButton("Scrolling", systemImage: "arrow.up.and.down.text.horizontal") {
+            hudButton("Scrolling", systemImage: "arrow.up.and.down.text.horizontal", shortcut: "⌥S") {
                 onDismiss()
                 ScrollingCaptureController.shared.beginScrollingCapture()
             }
-            hudButton("Timer", systemImage: "timer") {
-                onDismiss()
-                CaptureEngine.shared.captureWithSelfTimer()
-            }
-            hudButton("OCR", systemImage: "text.viewfinder") {
+            hudButton("OCR", systemImage: "text.viewfinder", shortcut: "⌥2") {
                 onDismiss()
                 OCRService.shared.captureTextFromScreen()
             }
+            hudButton("Clipboard", systemImage: "doc.on.clipboard", shortcut: "⌥V") {
+                onDismiss()
+                ClipboardWindowController.shared.show()
+            }
 
-            Divider().frame(height: 40)
+            Divider().overlay(RaycastTheme.borderSubtle).frame(height: 44)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
@@ -138,22 +138,35 @@ private struct AllInOneHUDView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.22), lineWidth: 1)
+        .background(
+            RoundedRectangle(cornerRadius: RaycastTheme.windowCornerRadius, style: .continuous)
+                .fill(RaycastTheme.windowBackground.opacity(0.95))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: RaycastTheme.windowCornerRadius, style: .continuous)
+                .stroke(RaycastTheme.borderHighlight, lineWidth: 1)
+        )
+        .preferredColorScheme(.dark)
     }
 
-    private func hudButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func hudButton(_ title: String, systemImage: String, shortcut: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(RaycastTheme.textPrimary)
                 Text(title)
-                    .font(.caption)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(RaycastTheme.textPrimary)
+                Text(shortcut)
+                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(RaycastTheme.textTertiary)
             }
-            .frame(width: 64, height: 56)
+            .frame(width: 66, height: 64)
+            .background(
+                RoundedRectangle(cornerRadius: RaycastTheme.rowCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
