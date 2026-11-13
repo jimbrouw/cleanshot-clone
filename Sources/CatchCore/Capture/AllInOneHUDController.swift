@@ -43,6 +43,7 @@ public final class AllInOneHUDController {
                 }
             ))
             panel.contentView = hosting
+            panel.invalidateShadow()
             panel.makeKeyAndOrderFront(nil)
             self.hudPanel = panel
         }
@@ -139,7 +140,7 @@ private struct AllInOneHUDView: View {
                         onDismiss()
                         ScrollingCaptureController.shared.beginScrollingCapture()
                     }
-                    hudButton("Loom Video", systemImage: "video.badge.waveform", shortcut: "⌥L") {
+                    hudButton("Video", systemImage: "video.badge.waveform", shortcut: "⌥L") {
                         onDismiss()
                         ScreenRecordingStudio.shared.presentStudio()
                     }

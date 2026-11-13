@@ -75,6 +75,9 @@ public struct RaycastVisualEffectBackground: NSViewRepresentable {
         view.layer?.addSublayer(hairline)
         view.layer?.cornerRadius = cornerRadius
         view.layer?.masksToBounds = true
+        if cornerRadius > 0 {
+            view.maskImage = Self.roundedMaskImage(cornerRadius: cornerRadius)
+        }
         return view
     }
 
@@ -83,6 +86,21 @@ public struct RaycastVisualEffectBackground: NSViewRepresentable {
         nsView.layer?.sublayers?.forEach { sub in
             sub.frame = nsView.bounds
         }
+        if cornerRadius > 0, nsView.maskImage == nil {
+            nsView.maskImage = Self.roundedMaskImage(cornerRadius: cornerRadius)
+        }
+    }
+
+    private static func roundedMaskImage(cornerRadius: CGFloat) -> NSImage {
+        let edge = max(cornerRadius * 2 + 2, 16)
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: cornerRadius, left: cornerRadius, bottom: cornerRadius, right: cornerRadius)
+        image.resizingMode = .stretch
+        return image
     }
 }
 
@@ -312,48 +330,31 @@ public struct RaycastLiquidGlassSurface: ViewModifier {
     }
 
     public func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(macOS 26.0, *) {
             let baseGlass: Glass = .regular
                 .tint(RaycastTheme.windowBackground.opacity(min(0.92, tintAlpha)))
                 .interactive(isInteractive)
             content
                 .background(
-                    RaycastVisualEffectBackground(
-                        cornerRadius: cornerRadius,
-                        tintAlpha: tintAlpha * 0.65,
-                        material: material
-                    )
+                    shape.fill(RaycastTheme.windowBackground.opacity(max(0.88, tintAlpha)))
                 )
                 .glassEffect(baseGlass, in: .rect(cornerRadius: cornerRadius))
+                .clipShape(shape)
                 .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
-                )
-                .shadow(
-                    color: Color.black.opacity(isElevated ? 0.45 : 0.22),
-                    radius: isElevated ? 18 : 8,
-                    x: 0,
-                    y: isElevated ? 10 : 4
+                    shape.strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
                 )
         } else {
             content
                 .background(
-                    RaycastVisualEffectBackground(
-                        cornerRadius: cornerRadius,
-                        tintAlpha: tintAlpha,
-                        material: material
-                    )
+                    ZStack {
+                        shape.fill(.ultraThinMaterial)
+                        shape.fill(RaycastTheme.windowBackground.opacity(max(0.88, tintAlpha)))
+                    }
                 )
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .clipShape(shape)
                 .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
-                )
-                .shadow(
-                    color: Color.black.opacity(isElevated ? 0.45 : 0.22),
-                    radius: isElevated ? 18 : 8,
-                    x: 0,
-                    y: isElevated ? 10 : 4
+                    shape.strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
                 )
         }
     }

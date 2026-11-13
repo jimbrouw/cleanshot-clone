@@ -259,15 +259,15 @@ public struct SettingsWindowView: View {
 
     private var recordingTab: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Loom Video & Screen Recording").font(.title2.bold())
+            Text("Catch Studio & Screen Recording").font(.title2.bold())
 
-            settingsSectionCard(title: "Loom Studio (Camera Bubble + Hidden Teleprompter)", icon: "video.badge.waveform") {
+            settingsSectionCard(title: "Catch Studio (Camera Bubble + Hidden Teleprompter)", icon: "video.badge.waveform") {
                 Text("Record your screen with a floating Picture-in-Picture camera bubble and an eye-line teleprompter that stays completely hidden from viewers.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 10) {
-                    Button("Open Loom Video Studio (⌥⇧⌘L)") {
+                    Button("Open Catch Studio (⌥⇧⌘L)") {
                         ScreenRecordingStudio.shared.presentStudio()
                     }
                     .buttonStyle(.borderedProminent)

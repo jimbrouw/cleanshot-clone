@@ -10,11 +10,15 @@ public enum RaycastPanelState: String, Sendable {
     case expanded
 }
 
-public final class ClipboardWindowController {
+public final class ClipboardWindowController: NSObject, NSWindowDelegate {
     public static let shared = ClipboardWindowController()
     private var panel: NSPanel?
     public private(set) var previousFrontmostApp: NSRunningApplication?
     public private(set) var panelState: RaycastPanelState = .idle
+
+    private override init() {
+        super.init()
+    }
 
     public var windowDiagnostics: [String: Any] {
         guard let panel,
@@ -49,28 +53,29 @@ public final class ClipboardWindowController {
 
             self.panelState = .warming
             let screen = NSScreen.main ?? NSScreen.screens.first
-            let width: CGFloat = 760
-            let height: CGFloat = 500
+            let width: CGFloat = 820
+            let height: CGFloat = 540
             let originX = (screen?.visibleFrame.midX ?? 600) - width / 2
-            let originY = (screen?.visibleFrame.midY ?? 450) - height / 2 + 40
+            let originY = (screen?.visibleFrame.midY ?? 450) - height / 2 + 20
 
             let p = NSPanel(
                 contentRect: NSRect(x: originX, y: originY, width: width, height: height),
-                styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
-            p.title = "Clipboard History"
-            p.titleVisibility = .hidden
-            p.titlebarAppearsTransparent = true
-            p.isMovableByWindowBackground = true
-            p.level = .floating
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            p.title = "Catch Clipboard History"
+            p.titleVisibility = .visible
+            p.titlebarAppearsTransparent = false
+            p.level = .normal
+            p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             p.appearance = NSAppearance(named: .darkAqua)
-            p.backgroundColor = .clear
-            p.isOpaque = false
+            p.backgroundColor = NSColor(srgbRed: 0.075, green: 0.082, blue: 0.102, alpha: 1.0)
+            p.isOpaque = true
             p.hasShadow = true
             p.isReleasedWhenClosed = false
+            p.minSize = NSSize(width: 720, height: 480)
+            p.delegate = self
 
             let hosting = NSHostingController(rootView: RaycastClipboardHistoryView(
                 onClose: { [weak self] in
@@ -96,7 +101,13 @@ public final class ClipboardWindowController {
 
     public func close() {
         panelState = .cancelling
-        panel?.orderOut(nil)
+        let current = panel
+        panel = nil
+        current?.orderOut(nil)
+        panelState = .idle
+    }
+
+    public func windowWillClose(_ notification: Notification) {
         panel = nil
         panelState = .idle
     }
@@ -187,11 +198,8 @@ public struct RaycastClipboardHistoryView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .frame(width: 760, height: 500)
-        .background(
-            RaycastVisualEffectBackground(cornerRadius: RaycastTheme.windowCornerRadius)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: RaycastTheme.windowCornerRadius, style: .continuous))
+        .frame(minWidth: 720, minHeight: 480)
+        .background(RaycastTheme.windowBackground)
         .preferredColorScheme(.dark)
         .onAppear {
             store.checkSystemPasteboard()
@@ -216,127 +224,101 @@ public struct RaycastClipboardHistoryView: View {
             .frame(height: 1)
     }
 
-    // MARK: - Top Navigation / Search Bar
+    // MARK: - Native Header & Filter Bar
 
     private var topNavigationBar: some View {
-        HStack(spacing: 10) {
-            Button(action: onClose) {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(RaycastTheme.textSecondary)
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color.white.opacity(0.08)))
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.escape, modifiers: [])
-
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(RaycastTheme.textTertiary)
-
-            TextField("Type to filter entries…", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16, weight: .regular))
-                .foregroundStyle(RaycastTheme.textPrimary)
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(RaycastTheme.textTertiary)
-                }
-                .buttonStyle(.plain)
-            }
 
-            // Sequential paste quick badge
-            if !store.entries.isEmpty {
-                Button {
-                    if let pasted = store.pasteNextSequential() {
-                        showToast("Sequential Paste: \(pasted.displayTitle)")
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.insert")
-                            .font(.system(size: 11))
-                        Text("Seq \(min(store.sequentialPasteIndex + 1, max(1, store.entries.count)))/\(store.entries.count)")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundStyle(RaycastTheme.textSecondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.white.opacity(0.07))
-                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(RaycastTheme.borderSubtle, lineWidth: 1))
-                    )
-                }
-                .buttonStyle(.plain)
-                .help("Paste next item sequentially (⌃⇧⌘V)")
-            }
+                    TextField("Search copied text, screenshots, links, or OCR…", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13.5, weight: .regular))
+                        .foregroundStyle(RaycastTheme.textPrimary)
 
-            // Tag filter dropdown
-            if !store.allTags.isEmpty {
-                Menu {
-                    Button("All Tags") { selectedTag = "" }
-                    Divider()
-                    ForEach(store.allTags, id: \.self) { tag in
-                        Button(tag) { selectedTag = tag }
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(RaycastTheme.textTertiary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "tag")
-                            .font(.system(size: 11))
-                        Text(selectedTag.isEmpty ? "All Tags" : selectedTag)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(RaycastTheme.panelSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(RaycastTheme.borderSubtle, lineWidth: 1)
+                        )
+                )
+
+                if !store.allTags.isEmpty {
+                    Menu {
+                        Button("All Tags") { selectedTag = "" }
+                        Divider()
+                        ForEach(store.allTags, id: \.self) { tag in
+                            Button(tag) { selectedTag = tag }
+                        }
+                    } label: {
+                        Label(selectedTag.isEmpty ? "Tags" : selectedTag, systemImage: "tag")
                             .font(.system(size: 12, weight: .medium))
                     }
-                    .foregroundStyle(RaycastTheme.textPrimary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(RaycastTheme.borderSubtle, lineWidth: 1))
-                    )
+                    .controlSize(.small)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+
+                Button("Clear") {
+                    store.clearAll(includePinned: false)
+                    showToast("Cleared unpinned history")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(store.entries.isEmpty)
+                .help("Clear all unpinned clipboard items")
             }
 
-            // Category filter dropdown ("Filter by Type")
-            Menu {
-                ForEach(ClipboardCategory.allCases) { category in
-                    Button {
-                        selectedCategory = category
-                        selectedEntryID = filteredEntries.first?.id
-                    } label: {
-                        Label(category.displayName, systemImage: category.systemImage)
+            // 1-Click Category Filter Pills
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach([ClipboardCategory.all, .text, .image, .link, .color, .file]) { category in
+                        let active = selectedCategory == category
+                        Button {
+                            selectedCategory = category
+                            selectedEntryID = filteredEntries.first?.id
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: category.systemImage)
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                Text(category == .all ? "All" : category.displayName.replacingOccurrences(of: " Only", with: ""))
+                                    .font(.system(size: 11.5, weight: active ? .semibold : .medium))
+                            }
+                            .foregroundStyle(active ? .white : RaycastTheme.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                Capsule()
+                                    .fill(active ? RaycastTheme.accent.opacity(0.85) : Color.white.opacity(0.06))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(active ? RaycastTheme.accent : RaycastTheme.borderSubtle, lineWidth: 0.75)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: selectedCategory.systemImage)
-                        .font(.system(size: 11))
-                    Text(selectedCategory.displayName)
-                        .font(.system(size: 12, weight: .medium))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(RaycastTheme.textTertiary)
-                }
-                .foregroundStyle(RaycastTheme.textPrimary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(RaycastTheme.borderSubtle, lineWidth: 1))
-                )
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
         }
-        .padding(.horizontal, 16)
-        .frame(height: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(RaycastTheme.panelSurface.opacity(0.65))
     }
 
     // MARK: - Split Master-Detail Content
@@ -420,6 +402,19 @@ public struct RaycastClipboardHistoryView: View {
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(RaycastTheme.textTertiary)
                 }
+
+                if isSelected {
+                    Button("Copy") {
+                        store.copyEntryToClipboard(entry)
+                        showToast("Copied to clipboard")
+                    }
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(RaycastTheme.accent.opacity(0.85)))
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
@@ -432,7 +427,8 @@ public struct RaycastClipboardHistoryView: View {
         .buttonStyle(.plain)
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
-                store.pasteEntryToActiveApp(entry)
+                store.copyEntryToClipboard(entry)
+                showToast("Copied to clipboard")
             }
         )
         .contextMenu {
@@ -486,6 +482,54 @@ public struct RaycastClipboardHistoryView: View {
 
     private func rightDetailPane(for entry: ClipboardEntry) -> some View {
         VStack(spacing: 0) {
+            // Prominent Action Header Bar
+            HStack(spacing: 8) {
+                Button {
+                    store.copyEntryToClipboard(entry)
+                    showToast("Copied to clipboard")
+                } label: {
+                    Label("Copy to Clipboard", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(RaycastTheme.accent)
+                .controlSize(.small)
+
+                Button {
+                    store.pasteEntryToActiveApp(entry)
+                } label: {
+                    Label("Paste into App", systemImage: "arrow.uturn.left.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Spacer()
+
+                Button {
+                    store.togglePin(id: entry.id)
+                    showToast(entry.isPinned ? "Unpinned entry" : "Pinned entry")
+                } label: {
+                    Image(systemName: entry.isPinned ? "pin.slash" : "pin")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(entry.isPinned ? "Unpin Entry" : "Pin Entry")
+
+                Button(role: .destructive) {
+                    store.deleteEntry(id: entry.id)
+                    showToast("Deleted entry")
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Delete Entry")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(RaycastTheme.panelSurface.opacity(0.45))
+
+            dividerLine
+
             // Top Preview Stage
             previewStage(for: entry)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -716,45 +760,60 @@ public struct RaycastClipboardHistoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Bottom Bar & Action Panel (⌘K)
+    // MARK: - Bottom Status & Action Bar
 
     private var bottomBar: some View {
-        RaycastActionBar(title: "Clipboard History", iconName: "doc.on.clipboard.fill") {
-            HStack(spacing: 12) {
-                if let entry = selectedEntry {
-                    Button {
-                        store.pasteEntryToActiveApp(entry)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Paste")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(RaycastTheme.textPrimary)
-                            RaycastKeycapBadge("↵")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.return, modifiers: [])
+        HStack(spacing: 10) {
+            Text("\(filteredEntries.count) \(filteredEntries.count == 1 ? "item" : "items") • Double-click any item to copy")
+                .font(.system(size: 11.5))
+                .foregroundStyle(RaycastTheme.textSecondary)
 
-                    Button {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            actionSearchText = ""
-                            showActionPanel.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Actions")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(RaycastTheme.textSecondary)
-                            RaycastKeycapBadge(["⌘", "K"])
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(showActionPanel ? 0.14 : 0.05)))
+            Spacer()
+
+            if !store.entries.isEmpty {
+                Button {
+                    if let pasted = store.pasteNextSequential() {
+                        showToast("Sequential Paste: \(pasted.displayTitle)")
                     }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut("k", modifiers: .command)
+                } label: {
+                    Label(
+                        "Seq Paste \(min(store.sequentialPasteIndex + 1, max(1, store.entries.count)))/\(store.entries.count)",
+                        systemImage: "text.insert"
+                    )
+                    .font(.system(size: 11.5, weight: .medium))
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Paste next item sequentially (⌃⇧⌘V)")
             }
+
+            if selectedEntry != nil {
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        actionSearchText = ""
+                        showActionPanel.toggle()
+                    }
+                } label: {
+                    Text("More (⌘K)")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut("k", modifiers: .command)
+            }
+
+            Button("Close") {
+                onClose()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 40)
+        .background(RaycastTheme.panelSurface.opacity(0.75))
+        .overlay(alignment: .top) {
+            dividerLine
         }
     }
 

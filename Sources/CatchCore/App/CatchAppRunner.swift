@@ -100,7 +100,7 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("Self-Timer", action: #selector(cmdSelfTimer), key: ""))
         menu.addItem(makeItem("Scrolling Capture", action: #selector(cmdScrollingCapture), key: ""))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Loom Video Studio (Screen + Cam + Teleprompter)...", action: #selector(cmdOpenLoomStudio), key: ""))
+        menu.addItem(makeItem("Catch Studio (Screen + Cam + Teleprompter)...", action: #selector(cmdOpenLoomStudio), key: ""))
         menu.addItem(makeItem("Toggle Teleprompter", action: #selector(cmdToggleTeleprompter), key: ""))
         menu.addItem(makeItem("Toggle Camera Bubble", action: #selector(cmdToggleCameraBubble), key: ""))
         menu.addItem(.separator())
