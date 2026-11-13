@@ -111,7 +111,7 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("Pin Screenshot...", action: #selector(cmdPinFile), key: ""))
         menu.addItem(makeItem("Unlock All Pinned Screenshots", action: #selector(cmdUnlockPinned), key: ""))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Clipboard History (Raycast Style)...", action: #selector(cmdOpenClipboardHistory), key: ""))
+        menu.addItem(makeItem("Clipboard History...", action: #selector(cmdOpenClipboardHistory), key: ""))
         menu.addItem(makeItem("Paste Sequentially", action: #selector(cmdPasteSequential), key: ""))
         menu.addItem(.separator())
         menu.addItem(makeItem("Capture History", action: #selector(cmdOpenHistory), key: ""))

@@ -380,8 +380,8 @@ public struct SettingsWindowView: View {
     private var aboutTab: some View {
         VStack(alignment: .leading, spacing: 16) {
             settingsSectionCard(title: "Catch Suite", icon: "camera.aperture") {
-                Text("Catch v2.0 — Loom Video Studio Edition").font(.title.bold())
-                Text("Native macOS Loom Video Studio, Viewer-Invisible Teleprompter, Floating Camera Bubble, Screen Capture, Annotate, OCR, Raycast Clipboard History & Pinned Screenshot Suite.")
+                Text("Catch v2.0 — Video Studio Edition").font(.title.bold())
+                Text("Native macOS Video Studio, Viewer-Invisible Teleprompter, Floating Camera Bubble, Screen Capture, Annotate, OCR, Clipboard History & Pinned Screenshot Suite.")
                     .foregroundStyle(.secondary)
                 Text("URL Scheme API: catch://")
                     .font(.caption.monospaced())
@@ -402,7 +402,7 @@ public struct SettingsWindowView: View {
     }
 
     private var clipboardSettingsCard: some View {
-        settingsSectionCard(title: "Raycast Clipboard History", icon: "doc.on.clipboard") {
+        settingsSectionCard(title: "Clipboard History", icon: "doc.on.clipboard") {
             HStack {
                 Text("\(clipboardStore.entries.count) items indexed in WAL SQLite3 + Trigram FTS5")
                     .font(.caption)

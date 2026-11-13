@@ -80,7 +80,7 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
         case .shortcuts: return "Stop the macOS Screenshot Conflict"
         case .captureModes: return "Every Capture Mode in One HUD"
         case .annotate: return "Annotate, Beautify & Redact Instantly"
-        case .clipboard: return "Raycast-Style Clipboard History & Sequential Paste"
+        case .clipboard: return "Instant Clipboard History & Sequential Paste"
         case .workflow: return "OCR Text Capture, Floating Pins & Quick Access"
         }
     }
@@ -96,7 +96,7 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
         case .annotate:
             return "Drop gradient wallpapers with rounded corners and shadows, draw crisp arrows and counters, and pixelate secrets."
         case .clipboard:
-            return "Search copied text, screenshots, links, colors, and files in a dark smoked-glass Raycast palette with OCR, QR decoding, and Sequential Paste."
+            return "Search copied text, screenshots, links, colors, and files in a dark smoked-glass command palette with OCR, QR decoding, and Sequential Paste."
         case .workflow:
             return "Extract selectable text from any screen region with on-device Vision OCR or pin references above every window."
         }
@@ -486,9 +486,9 @@ public struct OnboardingWizardView: View {
         HStack(spacing: 14) {
             demoActionTile(
                 icon: "doc.on.clipboard",
-                title: "Raycast Clipboard History (⌥⇧⌘V)",
+                title: "Clipboard History (⌥⇧⌘V)",
                 caption: "Smoked-glass master-detail search for text, images, files, links, emails, and hex/RGB colors with OCR & QR decode.",
-                buttonTitle: "Try Raycast Clipboard History"
+                buttonTitle: "Try Clipboard History"
             ) {
                 ClipboardWindowController.shared.show()
             }
@@ -498,8 +498,8 @@ public struct OnboardingWizardView: View {
                 caption: "Copy several fields in a row, then tap Sequential Paste to step through and paste each item in order.",
                 buttonTitle: "Seed & Preview"
             ) {
-                _ = ClipboardHistoryStore.shared.recordText("#FF6363", sourceAppName: "Raycast Tour")
-                _ = ClipboardHistoryStore.shared.recordText("https://catch.app/screenshots", sourceAppName: "Raycast Tour")
+                _ = ClipboardHistoryStore.shared.recordText("#FF6363", sourceAppName: "Catch Tour")
+                _ = ClipboardHistoryStore.shared.recordText("https://catch.app/screenshots", sourceAppName: "Catch Tour")
                 ClipboardWindowController.shared.show()
             }
         }
