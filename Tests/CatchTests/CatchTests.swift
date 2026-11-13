@@ -496,4 +496,51 @@ final class CatchTests: XCTestCase {
         incompleteDict.removeValue(forKey: kCGWindowMemoryUsage as String)
         XCTAssertNil(CaptureEngine.WindowMetadataDescriptor(info: incompleteDict))
     }
+
+    func testLoomVideoStudioTeleprompterAndCameraBubble() {
+        let teleprompter = TeleprompterController()
+        XCTAssertTrue(teleprompter.hideFromCapture)
+        teleprompter.scriptText = String(repeating: "word ", count: 130)
+        teleprompter.wordsPerMinute = 130
+        XCTAssertEqual(teleprompter.wordCount, 130)
+        XCTAssertEqual(teleprompter.estimatedDurationSeconds, 60.0, accuracy: 0.5)
+
+        teleprompter.play()
+        XCTAssertTrue(teleprompter.isPlaying)
+        teleprompter.pause()
+        XCTAssertFalse(teleprompter.isPlaying)
+        teleprompter.reset()
+        XCTAssertEqual(teleprompter.scrollProgress, 0.0)
+
+        let camera = CameraBubbleController()
+        XCTAssertEqual(camera.shape, .circle)
+        XCTAssertEqual(camera.bubbleSize, .medium)
+        camera.toggleShape()
+        XCTAssertEqual(camera.shape, .squircle)
+        camera.cycleSize()
+        XCTAssertEqual(camera.bubbleSize, .large)
+        camera.cycleSize()
+        XCTAssertEqual(camera.bubbleSize, .small)
+
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("LoomTest-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let history = HistoryStore(rootDirectory: tempDir.appendingPathComponent("History", isDirectory: true))
+        let studio = ScreenRecordingStudio()
+
+        let exp = expectation(description: "Loom studio writes MP4 and records HistoryStore entry")
+        studio.startRecording(outputDirectory: tempDir, headlessSynthetic: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            XCTAssertTrue(studio.state.isActive)
+            studio.stopRecording(historyStore: history, presentQuickAccess: false) { url, item in
+                XCTAssertNotNil(url)
+                if let url {
+                    XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+                    XCTAssertEqual(url.pathExtension.lowercased(), "mp4")
+                }
+                XCTAssertEqual(item?.mediaType, .video)
+                exp.fulfill()
+            }
+        }
+        wait(for: [exp], timeout: 6.0)
+    }
 }

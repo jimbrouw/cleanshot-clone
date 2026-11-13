@@ -143,7 +143,7 @@ public enum URLSchemeRouter {
                 CatchAppRunner.shared.openFileForPin()
             }
         case .recordScreen(let rect, let display):
-            AllInOneHUDController.shared.show(initialRect: rect, displayIndex: display)
+            ScreenRecordingStudio.shared.presentStudio(initialRect: rect, displayIndex: display)
         case .captureText(let filepath, let rect, let display, let linebreaks):
             if let filepath {
                 _ = OCRService.shared.captureTextFromFile(url: URL(fileURLWithPath: filepath), lineBreaks: linebreaks)

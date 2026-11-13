@@ -100,6 +100,10 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("Self-Timer", action: #selector(cmdSelfTimer), key: ""))
         menu.addItem(makeItem("Scrolling Capture", action: #selector(cmdScrollingCapture), key: ""))
         menu.addItem(.separator())
+        menu.addItem(makeItem("Loom Video Studio (Screen + Cam + Teleprompter)...", action: #selector(cmdOpenLoomStudio), key: ""))
+        menu.addItem(makeItem("Toggle Teleprompter", action: #selector(cmdToggleTeleprompter), key: ""))
+        menu.addItem(makeItem("Toggle Camera Bubble", action: #selector(cmdToggleCameraBubble), key: ""))
+        menu.addItem(.separator())
         menu.addItem(makeItem("Capture Text (OCR)", action: #selector(cmdCaptureText), key: "2"))
         menu.addItem(makeItem("Read Aloud (Screenshot)", action: #selector(cmdReadAloud), key: ""))
         menu.addItem(makeItem("Open Annotate...", action: #selector(cmdOpenAnnotate), key: ""))
@@ -133,6 +137,9 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     @objc private func cmdCaptureWindow() { CaptureEngine.shared.captureWindow() }
     @objc private func cmdSelfTimer() { CaptureEngine.shared.captureWithSelfTimer() }
     @objc private func cmdScrollingCapture() { ScrollingCaptureController.shared.beginScrollingCapture() }
+    @objc private func cmdOpenLoomStudio() { ScreenRecordingStudio.shared.presentStudio() }
+    @objc private func cmdToggleTeleprompter() { TeleprompterController.shared.toggle() }
+    @objc private func cmdToggleCameraBubble() { CameraBubbleController.shared.toggle() }
     @objc private func cmdCaptureText() { OCRService.shared.captureTextFromScreen() }
     @objc private func cmdReadAloud() {
         Task { @MainActor in
@@ -241,6 +248,9 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 ReadAloudService.shared.captureAndReadAloud()
             }
+        }
+        registerHotKey(id: 21, keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            ScreenRecordingStudio.shared.presentStudio()
         }
     }
 

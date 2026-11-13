@@ -16,7 +16,7 @@ public final class AllInOneHUDController {
             }
 
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: displayIndex)
-            let width: CGFloat = 780
+            let width: CGFloat = 860
             let height: CGFloat = 132
             let frame = CGRect(
                 x: screen.frame.midX - width / 2,
@@ -138,6 +138,10 @@ private struct AllInOneHUDView: View {
                     hudButton("Scrolling", systemImage: "arrow.up.and.down.text.horizontal", shortcut: "⌥S") {
                         onDismiss()
                         ScrollingCaptureController.shared.beginScrollingCapture()
+                    }
+                    hudButton("Loom Video", systemImage: "video.badge.waveform", shortcut: "⌥L") {
+                        onDismiss()
+                        ScreenRecordingStudio.shared.presentStudio()
                     }
                     hudButton("OCR", systemImage: "text.viewfinder", shortcut: "⌥2") {
                         onDismiss()

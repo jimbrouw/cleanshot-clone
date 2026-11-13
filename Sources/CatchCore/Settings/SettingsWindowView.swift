@@ -258,17 +258,41 @@ public struct SettingsWindowView: View {
     }
 
     private var recordingTab: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Screen Recording").font(.title2.bold())
-            Text("Screenshots & Annotation suite is active; recording preferences are synchronized here.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle("Show controls while recording", isOn: $settings.recordingShowControls)
-            Toggle("Remember last selection", isOn: $settings.recordingRememberLastSelection)
-            Stepper("Video Frame rate: \(settings.recordingFrameRate) fps", value: $settings.recordingFrameRate, in: 15...60, step: 15)
-            Toggle("Scale Retina videos to 1x", isOn: $settings.recordingScaleRetinaTo1x)
-            Toggle("Record system audio", isOn: $settings.recordingRecordSystemAudio)
-            Stepper("GIF Frame rate: \(settings.recordingGifFrameRate) fps", value: $settings.recordingGifFrameRate, in: 5...30, step: 5)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Loom Video & Screen Recording").font(.title2.bold())
+
+            settingsSectionCard(title: "Loom Studio (Camera Bubble + Hidden Teleprompter)", icon: "video.badge.waveform") {
+                Text("Record your screen with a floating Picture-in-Picture camera bubble and an eye-line teleprompter that stays completely hidden from viewers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button("Open Loom Video Studio (⌥⇧⌘L)") {
+                        ScreenRecordingStudio.shared.presentStudio()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Toggle Teleprompter") {
+                        TeleprompterController.shared.toggle()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Toggle Camera Bubble") {
+                        CameraBubbleController.shared.toggle()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.top, 4)
+            }
+
+            settingsSectionCard(title: "Video & Audio Encoding", icon: "waveform") {
+                Toggle("Show controls while recording", isOn: $settings.recordingShowControls)
+                Toggle("Remember last selection", isOn: $settings.recordingRememberLastSelection)
+                Stepper("Video Frame rate: \(settings.recordingFrameRate) fps", value: $settings.recordingFrameRate, in: 15...60, step: 15)
+                Toggle("Scale Retina videos to 1x", isOn: $settings.recordingScaleRetinaTo1x)
+                Toggle("Record system audio", isOn: $settings.recordingRecordSystemAudio)
+                Stepper("GIF Frame rate: \(settings.recordingGifFrameRate) fps", value: $settings.recordingGifFrameRate, in: 5...30, step: 5)
+            }
         }
     }
 
@@ -356,8 +380,8 @@ public struct SettingsWindowView: View {
     private var aboutTab: some View {
         VStack(alignment: .leading, spacing: 16) {
             settingsSectionCard(title: "Catch Suite", icon: "camera.aperture") {
-                Text("Catch").font(.title.bold())
-                Text("Native macOS Screen Capture, Annotation, Background Tool, Scrolling Capture, OCR, Raycast-Grade Clipboard History & Pinned Screenshot Suite.")
+                Text("Catch v2.0 — Loom Video Studio Edition").font(.title.bold())
+                Text("Native macOS Loom Video Studio, Viewer-Invisible Teleprompter, Floating Camera Bubble, Screen Capture, Annotate, OCR, Raycast Clipboard History & Pinned Screenshot Suite.")
                     .foregroundStyle(.secondary)
                 Text("URL Scheme API: catch://")
                     .font(.caption.monospaced())
