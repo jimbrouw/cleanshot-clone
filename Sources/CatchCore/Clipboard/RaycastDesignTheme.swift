@@ -266,46 +266,96 @@ public struct RaycastActionBar<TrailingContent: View>: View {
     }
 }
 
-/// Liquid Glass surface modifier combining `RaycastVisualEffectBackground`,
-/// semantic top-edge specular gradient rim lighting, and multi-layer elevation shadow.
+/// Liquid Glass container wrapper: uses native macOS 26 `GlassEffectContainer` when available
+/// so nearby glass surfaces blend and morph smoothly, falling back cleanly on macOS 14–15.
+public struct RaycastGlassContainer<Content: View>: View {
+    public let spacing: CGFloat
+    @ViewBuilder public let content: () -> Content
+
+    public init(spacing: CGFloat = 12, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing
+        self.content = content
+    }
+
+    public var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content()
+            }
+        } else {
+            content()
+        }
+    }
+}
+
+/// Liquid Glass surface modifier using native macOS 26 `.glassEffect(...)` when available,
+/// layered over smoked obsidian depth tinting with macOS 14–15 `NSVisualEffectView` fallback.
 public struct RaycastLiquidGlassSurface: ViewModifier {
     public var cornerRadius: CGFloat
     public var tintAlpha: CGFloat
     public var material: NSVisualEffectView.Material
     public var isElevated: Bool
+    public var isInteractive: Bool
 
     public init(
         cornerRadius: CGFloat = RaycastTheme.windowCornerRadius,
         tintAlpha: CGFloat = 0.80,
         material: NSVisualEffectView.Material = .hudWindow,
-        isElevated: Bool = true
+        isElevated: Bool = true,
+        isInteractive: Bool = false
     ) {
         self.cornerRadius = cornerRadius
         self.tintAlpha = tintAlpha
         self.material = material
         self.isElevated = isElevated
+        self.isInteractive = isInteractive
     }
 
     public func body(content: Content) -> some View {
-        content
-            .background(
-                RaycastVisualEffectBackground(
-                    cornerRadius: cornerRadius,
-                    tintAlpha: tintAlpha,
-                    material: material
+        if #available(macOS 26.0, *) {
+            let baseGlass: Glass = .regular
+                .tint(RaycastTheme.windowBackground.opacity(min(0.92, tintAlpha)))
+                .interactive(isInteractive)
+            content
+                .background(
+                    RaycastVisualEffectBackground(
+                        cornerRadius: cornerRadius,
+                        tintAlpha: tintAlpha * 0.65,
+                        material: material
+                    )
                 )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
-            )
-            .shadow(
-                color: Color.black.opacity(isElevated ? 0.45 : 0.22),
-                radius: isElevated ? 18 : 8,
-                x: 0,
-                y: isElevated ? 10 : 4
-            )
+                .glassEffect(baseGlass, in: .rect(cornerRadius: cornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
+                )
+                .shadow(
+                    color: Color.black.opacity(isElevated ? 0.45 : 0.22),
+                    radius: isElevated ? 18 : 8,
+                    x: 0,
+                    y: isElevated ? 10 : 4
+                )
+        } else {
+            content
+                .background(
+                    RaycastVisualEffectBackground(
+                        cornerRadius: cornerRadius,
+                        tintAlpha: tintAlpha,
+                        material: material
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
+                )
+                .shadow(
+                    color: Color.black.opacity(isElevated ? 0.45 : 0.22),
+                    radius: isElevated ? 18 : 8,
+                    x: 0,
+                    y: isElevated ? 10 : 4
+                )
+        }
     }
 }
 
@@ -314,25 +364,46 @@ public extension View {
         cornerRadius: CGFloat = RaycastTheme.windowCornerRadius,
         tintAlpha: CGFloat = 0.80,
         material: NSVisualEffectView.Material = .hudWindow,
-        isElevated: Bool = true
+        isElevated: Bool = true,
+        isInteractive: Bool = false
     ) -> some View {
         modifier(
             RaycastLiquidGlassSurface(
                 cornerRadius: cornerRadius,
                 tintAlpha: tintAlpha,
                 material: material,
-                isElevated: isElevated
+                isElevated: isElevated,
+                isInteractive: isInteractive
             )
         )
     }
+
+    @ViewBuilder
+    func raycastGlassButton(prominent: Bool = false) -> some View {
+        if #available(macOS 26.0, *) {
+            if prominent {
+                self.buttonStyle(.glassProminent)
+            } else {
+                self.buttonStyle(.glass)
+            }
+        } else {
+            if prominent {
+                self.buttonStyle(.borderedProminent)
+            } else {
+                self.buttonStyle(.bordered)
+            }
+        }
+    }
 }
 
-/// Tactile smoked-glass interactive tile with spring hover/press physics and specular border highlight.
+/// Tactile smoked-glass interactive tile with spring hover/press physics, native Liquid Glass
+/// interactivity on macOS 26+, and Reduce Motion support.
 public struct RaycastInteractiveTile<Content: View>: View {
     public let cornerRadius: CGFloat
     public let action: () -> Void
     @ViewBuilder public let content: () -> Content
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     @State private var isPressed = false
 
@@ -348,36 +419,49 @@ public struct RaycastInteractiveTile<Content: View>: View {
 
     public var body: some View {
         Button {
-            withAnimation(RaycastTheme.microSpring) {
-                isPressed = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                withAnimation(RaycastTheme.microSpring) {
-                    isPressed = false
+            if !reduceMotion {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isPressed = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isPressed = false
+                    }
                 }
             }
             action()
         } label: {
-            content()
-                .background(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(isHovered ? Color.white.opacity(0.11) : Color.white.opacity(0.05))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(
-                            isHovered ? AnyShapeStyle(RaycastTheme.specularGradient) : AnyShapeStyle(Color.white.opacity(0.08)),
-                            lineWidth: 0.75
-                        )
-                )
-                .scaleEffect(isPressed ? 0.95 : (isHovered ? 1.03 : 1.0))
-                .animation(RaycastTheme.microSpring, value: isHovered)
-                .animation(RaycastTheme.microSpring, value: isPressed)
+            tileSurface
+                .scaleEffect(reduceMotion ? 1.0 : (isPressed ? 0.95 : (isHovered ? 1.03 : 1.0)))
+                .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isHovered)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: isPressed)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering in
             isHovered = hovering
+        }
+    }
+
+    @ViewBuilder
+    private var tileSurface: some View {
+        let base = content()
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isHovered ? Color.white.opacity(0.13) : Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        isHovered ? AnyShapeStyle(RaycastTheme.specularGradient) : AnyShapeStyle(Color.white.opacity(0.10)),
+                        lineWidth: 0.75
+                    )
+            )
+
+        if #available(macOS 26.0, *) {
+            base.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            base
         }
     }
 }

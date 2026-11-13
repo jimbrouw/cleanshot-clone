@@ -15,12 +15,14 @@ public final class SettingsWindowController {
                 return
             }
             let win = NSWindow(
-                contentRect: CGRect(x: 240, y: 160, width: 780, height: 580),
-                styleMask: [.titled, .closable, .miniaturizable],
+                contentRect: CGRect(x: 240, y: 160, width: 820, height: 600),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
+            win.minSize = NSSize(width: 680, height: 480)
             win.title = "Catch Settings"
+            win.toolbarStyle = .unified
             win.isReleasedWhenClosed = false
             win.contentView = NSHostingView(rootView: SettingsWindowView(initialTab: tab))
             win.makeKeyAndOrderFront(nil)
@@ -56,14 +58,17 @@ public struct SettingsWindowView: View {
                 Label("Advanced", systemImage: "slider.horizontal.3").tag(SettingsTab.advanced)
                 Label("About", systemImage: "info.circle").tag(SettingsTab.about)
             }
-            .frame(minWidth: 185)
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 185, ideal: 210, max: 250)
         } detail: {
             ScrollView {
                 detailContent
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .navigationTitle("Catch Settings")
         }
+        .navigationSplitViewStyle(.prominentDetail)
         .sheet(isPresented: $showFileNameBuilder) {
             FileNameFormatBuilderSheet(settings: settings)
         }

@@ -236,16 +236,16 @@ public final class SettingsStore: ObservableObject {
         self.playSounds = defaults.object(forKey: keyPrefix + "playSounds") as? Bool ?? true
         self.shutterSound = defaults.string(forKey: keyPrefix + "shutterSound") ?? "System Default"
         self.exportLocationPath = defaults.string(forKey: keyPrefix + "exportLocationPath") ?? desktopPath
-        self.afterCaptureActions = Self.loadCodable(defaults, key: keyPrefix + "afterCaptureActions") ?? [.showQuickAccessOverlay]
+        self.afterCaptureActions = Self.loadCodable(defaults, key: keyPrefix + "afterCaptureActions") ?? [.showQuickAccessOverlay, .copyToClipboard]
 
         self.shortcuts = Self.loadCodable(defaults, key: keyPrefix + "shortcuts") ?? Self.defaultShortcuts()
 
         self.overlayPosition = OverlayPosition(rawValue: defaults.string(forKey: keyPrefix + "overlayPosition") ?? "") ?? .left
         self.moveToActiveScreen = defaults.object(forKey: keyPrefix + "moveToActiveScreen") as? Bool ?? true
         self.overlaySize = defaults.object(forKey: keyPrefix + "overlaySize") as? Double ?? 1.0
-        self.autoCloseEnabled = defaults.object(forKey: keyPrefix + "autoCloseEnabled") as? Bool ?? false
-        self.autoCloseAction = AutoCloseAction(rawValue: defaults.string(forKey: keyPrefix + "autoCloseAction") ?? "") ?? .saveAndClose
-        self.autoCloseIntervalSeconds = defaults.object(forKey: keyPrefix + "autoCloseIntervalSeconds") as? Int ?? 30
+        self.autoCloseEnabled = defaults.object(forKey: keyPrefix + "autoCloseEnabled") as? Bool ?? true
+        self.autoCloseAction = AutoCloseAction(rawValue: defaults.string(forKey: keyPrefix + "autoCloseAction") ?? "") ?? .close
+        self.autoCloseIntervalSeconds = defaults.object(forKey: keyPrefix + "autoCloseIntervalSeconds") as? Int ?? 10
         self.closeAfterDragging = defaults.object(forKey: keyPrefix + "closeAfterDragging") as? Bool ?? true
         self.closeAfterUploading = defaults.object(forKey: keyPrefix + "closeAfterUploading") as? Bool ?? true
         self.saveButtonBehavior = SaveButtonBehavior(rawValue: defaults.string(forKey: keyPrefix + "saveButtonBehavior") ?? "") ?? .saveToExportLocation

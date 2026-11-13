@@ -121,65 +121,67 @@ private struct AllInOneHUDView: View {
             }
 
             // Main Action Tiles + Custom Dimensions
-            HStack(spacing: 10) {
-                hudButton("Area", systemImage: "viewfinder", shortcut: "⌥4") {
-                    onDismiss()
-                    CaptureEngine.shared.captureArea()
-                }
-                hudButton("Fullscreen", systemImage: "macwindow.on.rectangle", shortcut: "⌥3") {
-                    onDismiss()
-                    CaptureEngine.shared.captureFullscreen()
-                }
-                hudButton("Window", systemImage: "macwindow", shortcut: "⌥W") {
-                    onDismiss()
-                    CaptureEngine.shared.captureWindow()
-                }
-                hudButton("Scrolling", systemImage: "arrow.up.and.down.text.horizontal", shortcut: "⌥S") {
-                    onDismiss()
-                    ScrollingCaptureController.shared.beginScrollingCapture()
-                }
-                hudButton("OCR", systemImage: "text.viewfinder", shortcut: "⌥2") {
-                    onDismiss()
-                    OCRService.shared.captureTextFromScreen()
-                }
-                hudButton("Clipboard", systemImage: "doc.on.clipboard", shortcut: "⌥V") {
-                    onDismiss()
-                    ClipboardWindowController.shared.show()
-                }
-
-                Divider().overlay(RaycastTheme.borderSubtle).frame(height: 50)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 4) {
-                        TextField("W", text: $widthInput)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 54)
-                        Text("×")
-                            .foregroundStyle(.secondary)
-                        TextField("H", text: $heightInput)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 54)
+            RaycastGlassContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    hudButton("Area", systemImage: "viewfinder", shortcut: "⌥4") {
+                        onDismiss()
+                        CaptureEngine.shared.captureArea()
                     }
-                    HStack(spacing: 6) {
-                        Toggle("Lock", isOn: $lockAspectRatio)
-                            .toggleStyle(.checkbox)
-                            .font(.caption2)
-                        Button("Capture") {
-                            let w = Double(widthInput) ?? 608
-                            let h = Double(heightInput) ?? 455
-                            let screen = CaptureEngine.shared.resolveScreen(displayIndex: nil)
-                            let rect = CGRect(
-                                x: screen.frame.midX - w / 2,
-                                y: screen.frame.midY - h / 2,
-                                width: w,
-                                height: h
-                            )
-                            onDismiss()
-                            CaptureEngine.shared.captureArea(rect: rect)
+                    hudButton("Fullscreen", systemImage: "macwindow.on.rectangle", shortcut: "⌥3") {
+                        onDismiss()
+                        CaptureEngine.shared.captureFullscreen()
+                    }
+                    hudButton("Window", systemImage: "macwindow", shortcut: "⌥W") {
+                        onDismiss()
+                        CaptureEngine.shared.captureWindow()
+                    }
+                    hudButton("Scrolling", systemImage: "arrow.up.and.down.text.horizontal", shortcut: "⌥S") {
+                        onDismiss()
+                        ScrollingCaptureController.shared.beginScrollingCapture()
+                    }
+                    hudButton("OCR", systemImage: "text.viewfinder", shortcut: "⌥2") {
+                        onDismiss()
+                        OCRService.shared.captureTextFromScreen()
+                    }
+                    hudButton("Clipboard", systemImage: "doc.on.clipboard", shortcut: "⌥V") {
+                        onDismiss()
+                        ClipboardWindowController.shared.show()
+                    }
+
+                    Divider().overlay(RaycastTheme.borderSubtle).frame(height: 50)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            TextField("W", text: $widthInput)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 54)
+                            Text("×")
+                                .foregroundStyle(.secondary)
+                            TextField("H", text: $heightInput)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 54)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(RaycastTheme.accent)
-                        .controlSize(.mini)
+                        HStack(spacing: 6) {
+                            Toggle("Lock", isOn: $lockAspectRatio)
+                                .toggleStyle(.checkbox)
+                                .font(.caption2)
+                            Button("Capture") {
+                                let w = Double(widthInput) ?? 608
+                                let h = Double(heightInput) ?? 455
+                                let screen = CaptureEngine.shared.resolveScreen(displayIndex: nil)
+                                let rect = CGRect(
+                                    x: screen.frame.midX - w / 2,
+                                    y: screen.frame.midY - h / 2,
+                                    width: w,
+                                    height: h
+                                )
+                                onDismiss()
+                                CaptureEngine.shared.captureArea(rect: rect)
+                            }
+                            .raycastGlassButton(prominent: true)
+                            .tint(RaycastTheme.accent)
+                            .controlSize(.mini)
+                        }
                     }
                 }
             }
@@ -188,6 +190,9 @@ private struct AllInOneHUDView: View {
         .padding(.vertical, 12)
         .raycastLiquidGlass(cornerRadius: RaycastTheme.windowCornerRadius)
         .preferredColorScheme(.dark)
+        .onExitCommand {
+            onDismiss()
+        }
     }
 
     private func presetPill(_ title: String, w: String, h: String) -> some View {

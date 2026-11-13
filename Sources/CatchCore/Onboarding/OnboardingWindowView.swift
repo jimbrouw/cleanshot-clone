@@ -26,15 +26,18 @@ public final class OnboardingWindowController {
 
         let hosting = NSHostingController(rootView: view)
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 860, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        w.minSize = NSSize(width: 780, height: 560)
         w.title = "Welcome to Catch"
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
         w.isMovableByWindowBackground = true
+        w.backgroundColor = .clear
+        w.isOpaque = false
         w.contentViewController = hosting
         w.center()
         w.isReleasedWhenClosed = false
@@ -102,6 +105,8 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
 
 public struct OnboardingWizardView: View {
     @ObservedObject private var permissions = SystemPermissionsManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var stepNamespace
     @State private var currentStep: OnboardingStep
     public var onFinish: () -> Void
     public var onClose: () -> Void
@@ -113,42 +118,56 @@ public struct OnboardingWizardView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            headerBar
-            Divider().opacity(0.3)
+        ZStack {
+            RaycastVisualEffectBackground(cornerRadius: 0, tintAlpha: 0.86, material: .underWindowBackground)
+                .ignoresSafeArea()
 
-            VStack(spacing: 18) {
-                animationStage
-                    .frame(height: 225)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(red: 0.08, green: 0.10, blue: 0.16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                            )
-                    )
+            VStack(spacing: 0) {
+                headerBar
+                Rectangle().fill(RaycastTheme.borderSubtle).frame(height: 1)
 
-                VStack(spacing: 6) {
-                    Text(currentStep.headline)
-                        .font(.system(size: 22, weight: .bold))
-                    Text(currentStep.subtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 640)
+                VStack(spacing: 18) {
+                    animationStage
+                        .frame(height: 230)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color(red: 0.06, green: 0.08, blue: 0.13))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.45), radius: 16, x: 0, y: 8)
+                        .id(currentStep)
+                        .transition(reduceMotion ? .opacity : .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.98)), removal: .opacity))
+
+                    VStack(spacing: 6) {
+                        Text(currentStep.headline)
+                            .font(.system(size: 23, weight: .bold, design: .rounded))
+                            .foregroundStyle(RaycastTheme.textPrimary)
+                            .contentTransition(.interpolate)
+                        Text(currentStep.subtitle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(RaycastTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 660)
+                    }
+
+                    stepActionPanel
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .id("panel-\(currentStep.rawValue)")
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
                 }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 18)
 
-                stepActionPanel
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                Rectangle().fill(RaycastTheme.borderSubtle).frame(height: 1)
+                footerBar
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 18)
-
-            Divider().opacity(0.3)
-            footerBar
         }
-        .frame(width: 860, height: 600)
+        .frame(minWidth: 780, idealWidth: 880, minHeight: 560, idealHeight: 620)
+        .preferredColorScheme(.dark)
         .onAppear {
             permissions.startPolling(interval: 1.0)
         }
@@ -159,43 +178,60 @@ public struct OnboardingWizardView: View {
 
     private var headerBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(RaycastTheme.accent.opacity(0.18))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.accent)
+                }
                 Text("Catch Setup")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(RaycastTheme.textPrimary)
             }
+            .padding(.leading, 56) // Clear macOS traffic light buttons cleanly per HIG
 
             Spacer()
 
-            HStack(spacing: 6) {
-                ForEach(OnboardingStep.allCases) { step in
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            currentStep = step
+            RaycastGlassContainer(spacing: 4) {
+                HStack(spacing: 4) {
+                    ForEach(OnboardingStep.allCases) { step in
+                        let isActive = step == currentStep
+                        Button {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
+                                currentStep = step
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(isActive ? RaycastTheme.accent : RaycastTheme.textTertiary)
+                                    .frame(width: 6, height: 6)
+                                Text(step.title)
+                                    .font(.system(size: 11, weight: isActive ? .semibold : .medium))
+                                    .foregroundStyle(isActive ? RaycastTheme.textPrimary : RaycastTheme.textSecondary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background {
+                                if isActive {
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.12))
+                                        .overlay(Capsule().strokeBorder(RaycastTheme.specularGradient, lineWidth: 0.75))
+                                        .matchedGeometryEffect(id: "activeStepPill", in: stepNamespace)
+                                }
+                            }
                         }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(step == currentStep ? Color.accentColor : Color.secondary.opacity(0.35))
-                                .frame(width: 7, height: 7)
-                            Text(step.title)
-                                .font(.system(size: 11, weight: step == currentStep ? .bold : .medium))
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(step == currentStep ? Color.accentColor.opacity(0.15) : Color.clear)
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(4)
+                .background(Capsule().fill(Color.white.opacity(0.05)))
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
+        .padding(.trailing, 24)
+        .padding(.top, 14)
         .padding(.bottom, 12)
     }
 
@@ -272,37 +308,50 @@ public struct OnboardingWizardView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(title, systemImage: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 7) {
+                    Image(systemName: icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(granted ? .green : RaycastTheme.accent)
+                        .symbolEffect(.pulse, isActive: !granted)
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.textPrimary)
+                }
                 Spacer()
-                Text(granted ? "Granted" : "Required")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(granted ? .green : .orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill((granted ? Color.green : Color.orange).opacity(0.15)))
+                HStack(spacing: 4) {
+                    Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(granted ? "Granted" : "Required")
+                        .font(.system(size: 10.5, weight: .bold))
+                }
+                .foregroundStyle(granted ? .green : .orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3.5)
+                .background(
+                    Capsule()
+                        .fill((granted ? Color.green : Color.orange).opacity(0.16))
+                        .overlay(Capsule().strokeBorder((granted ? Color.green : Color.orange).opacity(0.35), lineWidth: 0.75))
+                )
             }
             Text(detail)
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(RaycastTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            HStack {
-                Button(buttonTitle, action: action)
-                    .buttonStyle(.borderedProminent)
-                    .tint(granted ? .green : .accentColor)
-                    .disabled(granted)
-                Button("Open Settings", action: openSettings)
-                    .buttonStyle(.bordered)
+            RaycastGlassContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button(buttonTitle, action: action)
+                        .raycastGlassButton(prominent: true)
+                        .tint(granted ? .green : RaycastTheme.accent)
+                        .disabled(granted)
+                    Button("Open Settings", action: openSettings)
+                        .raycastGlassButton(prominent: false)
+                }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 132)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.09), lineWidth: 1))
-        )
+        .padding(15)
+        .frame(maxWidth: .infinity, minHeight: 138)
+        .raycastLiquidGlass(cornerRadius: 14, tintAlpha: 0.55, isElevated: false)
     }
 
     private var shortcutsPanel: some View {
@@ -316,19 +365,20 @@ public struct OnboardingWizardView: View {
                     Button("Restore macOS Defaults") {
                         _ = permissions.restoreMacOSSystemScreenshotShortcuts()
                     }
-                    .buttonStyle(.bordered)
+                    .raycastGlassButton(prominent: false)
                 } else {
                     Button {
                         _ = permissions.disableMacOSSystemScreenshotShortcuts()
                     } label: {
                         Label("Disable macOS Screenshot Shortcuts & Use ⇧⌘3 / ⇧⌘4 / ⇧⌘5", systemImage: "wand.and.stars")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .raycastGlassButton(prominent: true)
+                    .tint(RaycastTheme.accent)
 
                     Button("Open Keyboard Settings") {
                         permissions.openKeyboardShortcutsSettings()
                     }
-                    .buttonStyle(.bordered)
+                    .raycastGlassButton(prominent: false)
                 }
             }
 
@@ -344,28 +394,20 @@ public struct OnboardingWizardView: View {
             if let msg = permissions.lastActionMessage {
                 Text(msg)
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(RaycastTheme.textSecondary)
             }
         }
-        .padding(14)
+        .padding(15)
         .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.09), lineWidth: 1))
-        )
+        .raycastLiquidGlass(cornerRadius: 14, tintAlpha: 0.55, isElevated: false)
     }
 
     private func shortcutBadge(_ title: String, keys: String) -> some View {
-        VStack(spacing: 4) {
-            Text(keys)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08)))
+        VStack(spacing: 5) {
+            RaycastKeycapBadge(keys)
             Text(title)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(RaycastTheme.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -495,24 +537,27 @@ public struct OnboardingWizardView: View {
         action: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(RaycastTheme.accent)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(RaycastTheme.textPrimary)
+            }
             Text(caption)
                 .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(RaycastTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             Button(buttonTitle, action: action)
-                .buttonStyle(.borderedProminent)
+                .raycastGlassButton(prominent: true)
+                .tint(RaycastTheme.accent)
                 .controlSize(.small)
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 116)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.09), lineWidth: 1))
-        )
+        .frame(maxWidth: .infinity, minHeight: 122)
+        .raycastLiquidGlass(cornerRadius: 14, tintAlpha: 0.55, isElevated: false)
     }
 
     private var footerBar: some View {
@@ -522,36 +567,41 @@ public struct OnboardingWizardView: View {
                 onClose()
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(RaycastTheme.textSecondary)
 
             Spacer()
 
-            if currentStep != .permissions {
-                Button("Back") {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        if let prev = OnboardingStep(rawValue: currentStep.rawValue - 1) {
-                            currentStep = prev
+            RaycastGlassContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    if currentStep != .permissions {
+                        Button("Back") {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
+                                if let prev = OnboardingStep(rawValue: currentStep.rawValue - 1) {
+                                    currentStep = prev
+                                }
+                            }
                         }
+                        .raycastGlassButton(prominent: false)
                     }
-                }
-                .buttonStyle(.bordered)
-            }
 
-            if currentStep != .workflow {
-                Button("Continue") {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        if let next = OnboardingStep(rawValue: currentStep.rawValue + 1) {
-                            currentStep = next
+                    if currentStep != .workflow {
+                        Button("Continue") {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
+                                if let next = OnboardingStep(rawValue: currentStep.rawValue + 1) {
+                                    currentStep = next
+                                }
+                            }
                         }
+                        .raycastGlassButton(prominent: true)
+                        .tint(RaycastTheme.accent)
+                    } else {
+                        Button("Finish Setup & Start Using Catch") {
+                            onFinish()
+                        }
+                        .raycastGlassButton(prominent: true)
+                        .tint(.green)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-            } else {
-                Button("Finish Setup & Start Using Catch") {
-                    onFinish()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
             }
         }
         .padding(.horizontal, 24)

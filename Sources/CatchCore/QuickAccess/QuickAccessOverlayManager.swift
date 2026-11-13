@@ -118,7 +118,7 @@ public final class QuickAccessOverlayManager: ObservableObject {
     private func createPanel(for card: QuickAccessCardModel) {
         let settings = SettingsStore.shared
         let scale = max(0.75, min(1.5, settings.overlaySize))
-        let panelSize = CGSize(width: 260 * scale, height: 196 * scale)
+        let panelSize = CGSize(width: 296 * scale, height: 238 * scale)
 
         let panel = NSPanel(
             contentRect: CGRect(origin: .zero, size: panelSize),
@@ -131,9 +131,15 @@ public final class QuickAccessOverlayManager: ObservableObject {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
+        panel.minSize = panelSize
+        panel.maxSize = panelSize
 
-        let view = QuickAccessCardView(card: card, manager: self)
-        panel.contentView = NSHostingView(rootView: view)
+        let view = QuickAccessCardView(card: card, cardSize: panelSize, manager: self)
+        let hosting = NSHostingView(rootView: view)
+        hosting.sizingOptions = []
+        hosting.frame = CGRect(origin: .zero, size: panelSize)
+        panel.contentView = hosting
+        panel.setContentSize(panelSize)
         panels[card.id] = panel
         if !temporarilyHidden {
             panel.orderFrontRegardless()
@@ -161,9 +167,19 @@ public final class QuickAccessOverlayManager: ObservableObject {
         }
     }
 
+    public func pauseAutoClose(for id: UUID) {
+        autoCloseTimers[id]?.invalidate()
+        autoCloseTimers.removeValue(forKey: id)
+    }
+
+    public func resumeAutoClose(for card: QuickAccessCardModel) {
+        scheduleAutoClose(for: card)
+    }
+
     private func scheduleAutoClose(for card: QuickAccessCardModel) {
         let settings = SettingsStore.shared
         guard settings.autoCloseEnabled else { return }
+        autoCloseTimers[card.id]?.invalidate()
         let interval = TimeInterval(max(3, settings.autoCloseIntervalSeconds))
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             guard let self else { return }
@@ -178,15 +194,30 @@ public final class QuickAccessOverlayManager: ObservableObject {
 
 private struct QuickAccessCardView: View {
     let card: QuickAccessOverlayManager.QuickAccessCardModel
+    let cardSize: CGSize
     let manager: QuickAccessOverlayManager
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
     @State private var uploadStatus: String?
+    @State private var countdownProgress: CGFloat = 1.0
+
+    private var autoCopiedOnCapture: Bool {
+        SettingsStore.shared.afterCaptureActions.contains(.copyToClipboard)
+    }
+
+    private var autoCloseEnabled: Bool {
+        SettingsStore.shared.autoCloseEnabled
+    }
 
     var body: some View {
         let nsImage = NSImage(cgImage: card.result.image, size: NSSize(width: card.result.image.width, height: card.result.image.height))
         VStack(spacing: 8) {
-            ZStack(alignment: .topTrailing) {
+            // Fixed-aspect thumbnail preview with overlay controls
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.black.opacity(0.45))
+
                 DraggableThumbnailView(
                     image: nsImage,
                     fileURL: URL(fileURLWithPath: card.historyItem.filePath),
@@ -197,90 +228,139 @@ private struct QuickAccessCardView: View {
                         }
                     }
                 )
-                .frame(maxWidth: .infinity, maxHeight: 122)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                HStack(spacing: 4) {
-                    if isHovering {
-                        Menu {
-                            Button("Copy") { copyAction() }
-                            Button("Save") { saveAction() }
-                            Button("Annotate") { annotateAction() }
-                            Button("Pin to the Screen") { pinAction() }
-                            Button("Upload to Cloud") { uploadAction() }
-                            Divider()
-                            Button("Quick Look") { quickLookAction() }
-                            Button("Show in Finder") { showInFinderAction() }
-                            Button("Open With...") { openWithAction() }
-                            Button("Open in Mail...") { openInMailAction() }
-                            Divider()
-                            Button("Temporarily Hide") { manager.toggleTemporarilyHide() }
-                            Button("Close") { manager.closeCard(id: card.id) }
-                        } label: {
-                            Image(systemName: "ellipsis.circle.fill")
-                                .foregroundStyle(.white, .black.opacity(0.65))
-                        }
-                        .menuStyle(.borderlessButton)
-                        .frame(width: 24, height: 24)
-                    }
-
-                    Button {
-                        manager.closeCard(id: card.id)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.white, .black.opacity(0.65))
-                    }
-                    .buttonStyle(.plain)
+                .padding(4)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .onTapGesture(count: 2) {
+                    annotateAction()
                 }
-                .padding(6)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: max(96, cardSize.height - 96))
+            .overlay(alignment: .topLeading) {
+                Text(isHovering ? "Drag to share · Double-click to Edit" : (autoCopiedOnCapture ? "Copied to Clipboard" : "Screenshot Ready"))
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6))
+                    .padding(7)
+            }
+            .overlay(alignment: .topTrailing) {
+                RaycastGlassContainer(spacing: 6) {
+                    HStack(spacing: 5) {
+                        if isHovering {
+                            Menu {
+                                Button("Copy") { copyAction() }
+                                Button("Save") { saveAction() }
+                                Button("Annotate") { annotateAction() }
+                                Button("Pin to the Screen") { pinAction() }
+                                Button("Upload to Cloud") { uploadAction() }
+                                Divider()
+                                Button("Quick Look") { quickLookAction() }
+                                Button("Show in Finder") { showInFinderAction() }
+                                Button("Open With...") { openWithAction() }
+                                Button("Open in Mail...") { openInMailAction() }
+                                Divider()
+                                Button("Temporarily Hide") { manager.toggleTemporarilyHide() }
+                                Button("Discard") { manager.closeCard(id: card.id) }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(Color.black.opacity(0.55)))
+                                    .overlay(Circle().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.6))
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .frame(width: 22, height: 22)
+                            .transition(.scale.combined(with: .opacity))
+                        }
+
+                        Button {
+                            manager.closeCard(id: card.id)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(Circle().fill(Color.black.opacity(0.55)))
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss")
+                    }
+                }
+                .padding(7)
             }
 
-            HStack(spacing: 6) {
-                actionBtn(systemImage: "doc.on.doc", label: "Copy", help: "Copy to Clipboard", action: copyAction)
-                actionBtn(systemImage: "square.and.arrow.down", label: "Save", help: "Save to Disk", action: saveAction)
-                actionBtn(systemImage: "pencil.tip.crop.circle", label: "Edit", help: "Annotate", action: annotateAction)
-                actionBtn(systemImage: "pin", label: "Pin", help: "Pin to Screen", action: pinAction)
-                actionBtn(systemImage: "icloud.and.arrow.up", label: "Cloud", help: "Upload to Cloud", action: uploadAction)
+            // Unified Liquid Glass action dock
+            RaycastGlassContainer(spacing: 5) {
+                HStack(spacing: 5) {
+                    actionBtn(systemImage: "doc.on.doc", label: "Copy", help: "Copy to Clipboard", action: copyAction)
+                    actionBtn(systemImage: "square.and.arrow.down", label: "Save", help: "Save to Disk", action: saveAction)
+                    actionBtn(systemImage: "pencil.tip.crop.circle", label: "Edit", help: "Open Annotate Studio", action: annotateAction)
+                    actionBtn(systemImage: "pin", label: "Pin", help: "Pin Floating Window", action: pinAction)
+                    actionBtn(systemImage: "icloud.and.arrow.up", label: "Cloud", help: "Upload & Copy Link", action: uploadAction)
+                    actionBtn(systemImage: "trash", label: "Drop", help: "Discard Card", isDestructive: true) {
+                        manager.closeCard(id: card.id)
+                    }
+                }
             }
 
-            HStack(spacing: 6) {
-                Text(card.result.format.rawValue.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(RaycastTheme.accent)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1.5)
-                    .background(Capsule().fill(RaycastTheme.accent.opacity(0.16)))
-
-                Text("\(card.result.image.width) × \(card.result.image.height)")
-                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                    .foregroundStyle(RaycastTheme.textSecondary)
-
-                Spacer()
-                if let uploadStatus {
-                    Text(uploadStatus)
-                        .font(.system(size: 10.5, weight: .semibold))
+            // Metadata + live auto-close progress bar
+            VStack(spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(card.result.format.rawValue.uppercased())
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                         .foregroundStyle(RaycastTheme.accent)
-                } else {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(card.result.encodedData.count), countStyle: .file))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(RaycastTheme.textTertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(RaycastTheme.accent.opacity(0.16)))
+
+                    Text("\(card.result.image.width) × \(card.result.image.height)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(RaycastTheme.textSecondary)
+
+                    Spacer()
+                    if let uploadStatus {
+                        Text(uploadStatus)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(RaycastTheme.accent)
+                    } else if isHovering && autoCloseEnabled {
+                        Text("Paused")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(RaycastTheme.textSecondary)
+                    } else {
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(card.result.encodedData.count), countStyle: .file))
+                            .font(.system(size: 10))
+                            .foregroundStyle(RaycastTheme.textTertiary)
+                    }
+                }
+
+                if autoCloseEnabled {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.08))
+                            Capsule()
+                                .fill(isHovering ? Color.white.opacity(0.35) : RaycastTheme.accent.opacity(0.85))
+                                .frame(width: geo.size.width * countdownProgress)
+                        }
+                    }
+                    .frame(height: 2.5)
                 }
             }
         }
         .padding(10)
-        .background(
-            ZStack {
-                RaycastVisualEffectBackground(cornerRadius: 14, tintAlpha: 0.84)
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(RaycastTheme.windowBackground.opacity(0.45))
-            }
-        )
+        .frame(width: cardSize.width, height: cardSize.height)
+        .raycastLiquidGlass(cornerRadius: 16, tintAlpha: 0.84)
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(
                     isHovering
                         ? AnyShapeStyle(LinearGradient(
-                            colors: [RaycastTheme.accent.opacity(0.55), Color.white.opacity(0.18)],
+                            colors: [RaycastTheme.accent.opacity(0.60), Color.white.opacity(0.22)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ))
@@ -288,16 +368,46 @@ private struct QuickAccessCardView: View {
                     lineWidth: 1
                 )
         )
-        .shadow(color: Color.black.opacity(isHovering ? 0.55 : 0.35), radius: isHovering ? 16 : 10, x: 0, y: 6)
-        .scaleEffect(isHovering ? 1.015 : 1.0)
-        .animation(RaycastTheme.microSpring, value: isHovering)
+        .scaleEffect(reduceMotion ? 1.0 : (isHovering ? 1.015 : 1.0))
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isHovering)
+        .onAppear {
+            startProgressAnimation()
+        }
         .onHover { hovering in
             isHovering = hovering
+            if hovering {
+                manager.pauseAutoClose(for: card.id)
+                countdownProgress = 1.0
+            } else {
+                manager.resumeAutoClose(for: card)
+                startProgressAnimation()
+            }
         }
     }
 
-    private func actionBtn(systemImage: String, label: String, help: String, action: @escaping () -> Void) -> some View {
-        QuickAccessActionButton(systemImage: systemImage, label: label, help: help, action: action)
+    private func startProgressAnimation() {
+        guard autoCloseEnabled else { return }
+        countdownProgress = 1.0
+        let duration = TimeInterval(max(3, SettingsStore.shared.autoCloseIntervalSeconds))
+        withAnimation(.linear(duration: duration)) {
+            countdownProgress = 0.0
+        }
+    }
+
+    private func actionBtn(
+        systemImage: String,
+        label: String,
+        help: String,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        QuickAccessActionButton(
+            systemImage: systemImage,
+            label: label,
+            help: help,
+            isDestructive: isDestructive,
+            action: action
+        )
     }
 
     private func copyAction() {
@@ -371,6 +481,11 @@ private struct DraggableThumbnailView: NSViewRepresentable {
         let v = DraggableNSImageView()
         v.image = image
         v.imageScaling = .scaleProportionallyUpOrDown
+        v.imageAlignment = .alignCenter
+        v.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        v.setContentHuggingPriority(.defaultLow, for: .vertical)
+        v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        v.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         v.fileURL = fileURL
         v.onDragCompleted = onDragCompleted
         return v
@@ -386,6 +501,10 @@ private struct DraggableThumbnailView: NSViewRepresentable {
 public final class DraggableNSImageView: NSImageView, NSDraggingSource {
     public var fileURL: URL?
     public var onDragCompleted: (() -> Void)?
+
+    public override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
 
     public func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         .copy
@@ -417,36 +536,59 @@ private struct QuickAccessActionButton: View {
     let systemImage: String
     let label: String
     let help: String
+    var isDestructive: Bool = false
     let action: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11.5, weight: .semibold))
-                Text(label)
-                    .font(.system(size: 8.5, weight: .medium))
-            }
-            .foregroundStyle(isHovered ? RaycastTheme.textPrimary : RaycastTheme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isHovered ? RaycastTheme.rowSelection : Color.white.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(isHovered ? Color.white.opacity(0.24) : Color.white.opacity(0.08), lineWidth: 0.75)
-                    )
-            )
-            .scaleEffect(isHovered ? 1.04 : 1.0)
-            .animation(RaycastTheme.microSpring, value: isHovered)
-            .contentShape(Rectangle())
+            buttonSurface
+                .scaleEffect(reduceMotion ? 1.0 : (isHovered ? 1.05 : 1.0))
+                .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: isHovered)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering in
             isHovered = hovering
         }
         .help(help)
+    }
+
+    @ViewBuilder
+    private var buttonSurface: some View {
+        let content = VStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .symbolEffect(.bounce, options: .speed(1.3), value: isHovered)
+            Text(label)
+                .font(.system(size: 8.5, weight: .medium))
+        }
+        .foregroundStyle(
+            isDestructive && isHovered
+                ? Color.red
+                : (isHovered ? RaycastTheme.textPrimary : RaycastTheme.textSecondary)
+        )
+        .frame(maxWidth: .infinity, minHeight: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isHovered ? (isDestructive ? Color.red.opacity(0.18) : RaycastTheme.rowSelection) : Color.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(
+                            isHovered
+                                ? (isDestructive ? Color.red.opacity(0.45) : Color.white.opacity(0.28))
+                                : Color.white.opacity(0.09),
+                            lineWidth: 0.75
+                        )
+                )
+        )
+
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+        } else {
+            content
+        }
     }
 }
