@@ -31,83 +31,118 @@ public struct PermissionsStageAnimationView: View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
-                let center = CGPoint(x: size.width * 0.5, y: size.height * 0.44)
-                let pulse = (sin(t * 2.4) + 1) * 0.5
+                let center = CGPoint(x: size.width * 0.5, y: size.height * 0.42)
+                let bothReady = hasScreenRecording && hasAccessibility
 
-                // Ambient glowing rings
-                for i in 0..<3 {
-                    let phase = (t * 0.45 + Double(i) * 0.33).truncatingRemainder(dividingBy: 1.0)
-                    let radius = 44 + phase * 82
-                    let alpha = (1 - phase) * 0.22
-                    let ringRect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-                    let color = (hasScreenRecording && hasAccessibility) ? Color.green : Color.accentColor
-                    ctx.stroke(Path(ellipseIn: ringRect), with: .color(color.opacity(alpha)), lineWidth: 2)
+                // Soft ambient aurora backdrop behind the focal card
+                let glowRect = CGRect(x: center.x - 140, y: center.y - 70, width: 280, height: 140)
+                ctx.fill(
+                    Path(ellipseIn: glowRect),
+                    with: .radialGradient(
+                        Gradient(colors: [
+                            (bothReady ? Color.green : Color.blue).opacity(0.22),
+                            Color.clear
+                        ]),
+                        center: center,
+                        startRadius: 10,
+                        endRadius: 145
+                    )
+                )
+
+                // Stylized macOS app window mockup with precision viewfinder corners
+                let winW: CGFloat = 196
+                let winH: CGFloat = 92
+                let bob = CGFloat(sin(t * 1.8) * 2.5)
+                let winRect = CGRect(
+                    x: center.x - winW * 0.5,
+                    y: center.y - winH * 0.5 + bob,
+                    width: winW,
+                    height: winH
+                )
+                let winPath = RoundedRectangle(cornerRadius: 12, style: .continuous).path(in: winRect)
+                ctx.fill(winPath, with: .color(Color.white.opacity(0.06)))
+                ctx.stroke(winPath, with: .color(Color.white.opacity(0.18)), lineWidth: 1)
+
+                // Traffic light dots inside the mini macOS window
+                let dotColors: [Color] = [.red.opacity(0.85), .yellow.opacity(0.85), .green.opacity(0.85)]
+                for (i, dotColor) in dotColors.enumerated() {
+                    let dotRect = CGRect(
+                        x: winRect.minX + 11 + CGFloat(i) * 11,
+                        y: winRect.minY + 10,
+                        width: 6,
+                        height: 6
+                    )
+                    ctx.fill(Path(ellipseIn: dotRect), with: .color(dotColor))
                 }
 
-                // Shield body
-                let shieldW: CGFloat = 78
-                let shieldH: CGFloat = 92
-                var shield = Path()
-                shield.move(to: CGPoint(x: center.x, y: center.y - shieldH * 0.5))
-                shield.addLine(to: CGPoint(x: center.x + shieldW * 0.5, y: center.y - shieldH * 0.30))
-                shield.addQuadCurve(
-                    to: CGPoint(x: center.x, y: center.y + shieldH * 0.5),
-                    control: CGPoint(x: center.x + shieldW * 0.46, y: center.y + shieldH * 0.25)
-                )
-                shield.addQuadCurve(
-                    to: CGPoint(x: center.x - shieldW * 0.5, y: center.y - shieldH * 0.30),
-                    control: CGPoint(x: center.x - shieldW * 0.46, y: center.y + shieldH * 0.25)
-                )
-                shield.closeSubpath()
+                // Precision camera viewfinder brackets inside window
+                let apertureCenter = CGPoint(x: winRect.midX, y: winRect.midY + 6)
+                let sweep = CGFloat((sin(t * 2.2) + 1) * 0.5)
+                let boxHalfW: CGFloat = 22 + sweep * 4
+                let boxHalfH: CGFloat = 16 + sweep * 3
+                let bracketLen: CGFloat = 8
+                let accentColor = bothReady ? Color.green : Color(red: 0.32, green: 0.65, blue: 1.0)
 
-                let shieldColor = (hasScreenRecording && hasAccessibility) ? Color.green : Color.blue
-                ctx.fill(shield, with: .linearGradient(
-                    Gradient(colors: [shieldColor.opacity(0.95), shieldColor.opacity(0.6)]),
-                    startPoint: CGPoint(x: center.x, y: center.y - shieldH * 0.5),
-                    endPoint: CGPoint(x: center.x, y: center.y + shieldH * 0.5)
-                ))
-                ctx.stroke(shield, with: .color(.white.opacity(0.45)), lineWidth: 1.5)
+                var brackets = Path()
+                // Top-left
+                brackets.move(to: CGPoint(x: apertureCenter.x - boxHalfW, y: apertureCenter.y - boxHalfH + bracketLen))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x - boxHalfW, y: apertureCenter.y - boxHalfH))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x - boxHalfW + bracketLen, y: apertureCenter.y - boxHalfH))
+                // Top-right
+                brackets.move(to: CGPoint(x: apertureCenter.x + boxHalfW - bracketLen, y: apertureCenter.y - boxHalfH))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x + boxHalfW, y: apertureCenter.y - boxHalfH))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x + boxHalfW, y: apertureCenter.y - boxHalfH + bracketLen))
+                // Bottom-right
+                brackets.move(to: CGPoint(x: apertureCenter.x + boxHalfW, y: apertureCenter.y + boxHalfH - bracketLen))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x + boxHalfW, y: apertureCenter.y + boxHalfH))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x + boxHalfW - bracketLen, y: apertureCenter.y + boxHalfH))
+                // Bottom-left
+                brackets.move(to: CGPoint(x: apertureCenter.x - boxHalfW + bracketLen, y: apertureCenter.y + boxHalfH))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x - boxHalfW, y: apertureCenter.y + boxHalfH))
+                brackets.addLine(to: CGPoint(x: apertureCenter.x - boxHalfW, y: apertureCenter.y + boxHalfH - bracketLen))
 
-                // Inner checkmark or lock glyph
-                var glyph = Path()
-                if hasScreenRecording && hasAccessibility {
-                    glyph.move(to: CGPoint(x: center.x - 16, y: center.y + 2))
-                    glyph.addLine(to: CGPoint(x: center.x - 4, y: center.y + 15))
-                    glyph.addLine(to: CGPoint(x: center.x + 18, y: center.y - 12))
+                ctx.stroke(brackets, with: .color(accentColor), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+
+                // Center status glyph: crisp lens dot or ready checkmark (no padlock)
+                if bothReady {
+                    var check = Path()
+                    check.move(to: CGPoint(x: apertureCenter.x - 7, y: apertureCenter.y + 1))
+                    check.addLine(to: CGPoint(x: apertureCenter.x - 2, y: apertureCenter.y + 6))
+                    check.addLine(to: CGPoint(x: apertureCenter.x + 8, y: apertureCenter.y - 5))
+                    ctx.stroke(check, with: .color(.green), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 } else {
-                    let lift = CGFloat(pulse * 3)
-                    glyph.addRoundedRect(in: CGRect(x: center.x - 13, y: center.y - 2, width: 26, height: 20), cornerSize: CGSize(width: 5, height: 5))
-                    glyph.addArc(center: CGPoint(x: center.x, y: center.y - 4 - lift), radius: 9, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+                    let ringRect = CGRect(x: apertureCenter.x - 6, y: apertureCenter.y - 6, width: 12, height: 12)
+                    ctx.stroke(Path(ellipseIn: ringRect), with: .color(Color.white.opacity(0.65)), lineWidth: 1.5)
+                    let dotRect = CGRect(x: apertureCenter.x - 2, y: apertureCenter.y - 2, width: 4, height: 4)
+                    ctx.fill(Path(ellipseIn: dotRect), with: .color(accentColor))
                 }
-                ctx.stroke(glyph, with: .color(.white), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
-                // Two animated permission pill cards below shield
-                drawTogglePill(ctx: ctx, origin: CGPoint(x: size.width * 0.5 - 128, y: size.height - 68), width: 120, label: "Screen Rec.", active: hasScreenRecording, animTime: t, phaseOffset: 0)
-                drawTogglePill(ctx: ctx, origin: CGPoint(x: size.width * 0.5 + 8, y: size.height - 68), width: 120, label: "Accessibility", active: hasAccessibility, animTime: t, phaseOffset: 0.9)
+                // Two animated permission switch pills below window
+                drawTogglePill(ctx: ctx, origin: CGPoint(x: size.width * 0.5 - 128, y: size.height - 52), width: 120, label: "Screen Rec.", active: hasScreenRecording, animTime: t, phaseOffset: 0)
+                drawTogglePill(ctx: ctx, origin: CGPoint(x: size.width * 0.5 + 8, y: size.height - 52), width: 120, label: "Accessibility", active: hasAccessibility, animTime: t, phaseOffset: 0.9)
             }
         }
     }
 
     private func drawTogglePill(ctx: GraphicsContext, origin: CGPoint, width: CGFloat, label: String, active: Bool, animTime: Double, phaseOffset: Double) {
-        let rect = CGRect(x: origin.x, y: origin.y, width: width, height: 36)
-        let bg = RoundedRectangle(cornerRadius: 10).path(in: rect)
-        ctx.fill(bg, with: .color(Color.white.opacity(0.08)))
-        ctx.stroke(bg, with: .color((active ? Color.green : Color.orange).opacity(0.55)), lineWidth: 1.2)
+        let rect = CGRect(x: origin.x, y: origin.y, width: width, height: 34)
+        let bg = RoundedRectangle(cornerRadius: 10, style: .continuous).path(in: rect)
+        ctx.fill(bg, with: .color(Color.white.opacity(0.07)))
+        ctx.stroke(bg, with: .color((active ? Color.green : Color.white).opacity(active ? 0.55 : 0.16)), lineWidth: 1)
 
         let cycle = ((animTime + phaseOffset) * 0.55).truncatingRemainder(dividingBy: 1.0)
         let demoProgress = active ? 1.0 : smoothStep(0.35, 0.7, cycle)
 
-        // Toggle track
-        let trackRect = CGRect(x: origin.x + 8, y: origin.y + 10, width: 28, height: 16)
+        let trackRect = CGRect(x: origin.x + 8, y: origin.y + 9, width: 28, height: 16)
         let trackPath = RoundedRectangle(cornerRadius: 8).path(in: trackRect)
-        ctx.fill(trackPath, with: .color(active ? Color.green : Color.gray.opacity(0.35 + 0.45 * demoProgress)))
+        ctx.fill(trackPath, with: .color(active ? Color.green : Color.blue.opacity(0.28 + 0.55 * demoProgress)))
 
         let knobX = trackRect.minX + 2 + CGFloat(demoProgress) * 12
         let knobRect = CGRect(x: knobX, y: trackRect.minY + 2, width: 12, height: 12)
         ctx.fill(Path(ellipseIn: knobRect), with: .color(.white))
 
-        let text = Text(label).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.92))
-        ctx.draw(text, at: CGPoint(x: origin.x + 76, y: origin.y + 18))
+        let text = Text(label).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.90))
+        ctx.draw(text, at: CGPoint(x: origin.x + 76, y: origin.y + 17))
     }
 }
 
