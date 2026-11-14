@@ -28,3 +28,32 @@ swift test
 bash scripts/build-app.sh
 open build/Catch.app
 ```
+
+### Local Catch Studio MCP bridge (experimental)
+
+The bridge starts disabled each time Catch launches. In **Settings → Recording**, enable **Allow local MCP access**, then configure a local MCP client to launch this executable over stdio:
+
+```json
+{
+  "mcpServers": {
+    "catch-studio": {
+      "command": "/usr/bin/python3",
+      "args": ["/Users/jim/Developer/CleanShot clone/scripts/catch-studio-mcp.py"]
+    }
+  }
+}
+```
+
+The adapter uses a private Unix socket. A client without a capture key can call only `selected_take`. In **Settings → Recording**, choose **Select finished take for editing…** to grant local clients access to one playable take and its notes. Use **Clear Selection** to revoke access through Catch.
+
+For capture control, choose **Start Agent Capture Session** and use **Copy Capture Session Key**. Supply the key as `CATCH_CAPTURE_KEY` in the trusted client's process environment, then start or reconnect the MCP client. The key grants `load_script`, `screenshot`, `start`, `pause`, `resume`, `stop`, and `status`. End the session from Settings or Catch's menu to revoke the key. A recording already in progress can still be stopped in Studio. Local clients running as your macOS user can read a take you select while the bridge is enabled.
+
+`load_script` accepts `script` and optional `edit_notes` separately. Turn on **Save script and edit notes with next take** before recording to save a matching `.handoff.json`. The option applies to one take. Legacy sidecars can be read by a human editor. Catch requires a new sidecar with media identity to share through MCP. The MP4 and sidecar can also be copied together for a human editor.
+
+Open the hidden teleprompter before starting a take. Catch locks the privacy setting during the take and reports a failed start if it cannot build the required window exclusions.
+
+Choose **Camera** and **Microphone** directly in Catch Studio or in **Settings → Recording**. Catch remembers the device choices for future takes. **System Default** follows macOS when the device is opened. **Check mic** uses the selected recording input and stops when recording or voice scrolling starts. The teleprompter's voice modes use the Mac's default input.
+
+During an active recording, hold **Option-Shift-Command-D** to draw, release to return pointer input, and use **Clear Ink** to clear the layer. Marks fade after release. The review window exports a new file; passthrough trim points may move to video keyframes, so check the copy.
+
+These features are experimental: microphone recording, pause timing, prompter exclusion, hold-to-draw, trim, and the end-to-end bridge require live recording and playback verification. The default `catch://` setting is independent of the bridge.

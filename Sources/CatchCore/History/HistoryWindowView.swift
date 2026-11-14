@@ -112,6 +112,10 @@ private struct HistoryCardCell: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
+                if item.mediaType == .video {
+                    Button("Review") { TakeReviewWindowController.shared.show(url: URL(fileURLWithPath: item.filePath)) }
+                        .controlSize(.mini)
+                } else {
                 Button("Restore") {
                     QuickAccessOverlayManager.shared.restore(historyItem: item)
                 }
@@ -124,6 +128,7 @@ private struct HistoryCardCell: View {
                     }
                 }
                 .controlSize(.mini)
+                }
                 Button(role: .destructive) {
                     HistoryStore.shared.deleteItem(id: item.id)
                 } label: {

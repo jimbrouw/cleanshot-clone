@@ -111,6 +111,11 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(makeItem("Catch Studio (Screen + Cam + Teleprompter)...", action: #selector(cmdOpenLoomStudio), key: ""))
         menu.addItem(makeItem("Toggle Teleprompter", action: #selector(cmdToggleTeleprompter), key: ""))
+        let endSession = makeItem("End Agent Capture Session", action: #selector(cmdEndAgentCaptureSession), key: "")
+        menu.addItem(endSession)
+        NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: menu, queue: nil) { _ in
+            endSession.isHidden = LocalStudioBridge.shared.captureKey == nil
+        }
         menu.addItem(makeItem("Toggle Camera Bubble", action: #selector(cmdToggleCameraBubble), key: ""))
         menu.addItem(.separator())
         menu.addItem(makeItem("Capture Text (OCR)", action: #selector(cmdCaptureText), key: "2"))
@@ -148,6 +153,7 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     @objc private func cmdScrollingCapture() { ScrollingCaptureController.shared.beginScrollingCapture() }
     @objc private func cmdOpenLoomStudio() { ScreenRecordingStudio.shared.presentStudio() }
     @objc private func cmdToggleTeleprompter() { TeleprompterController.shared.toggle() }
+    @objc private func cmdEndAgentCaptureSession() { LocalStudioBridge.shared.endCaptureSession() }
     @objc private func cmdToggleCameraBubble() { CameraBubbleController.shared.toggle() }
     @objc private func cmdCaptureText() { OCRService.shared.captureTextFromScreen() }
     @objc private func cmdReadAloud() {
@@ -196,15 +202,20 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
 
     private func registerGlobalHotkeys() {
         if !isHotKeyHandlerInstalled {
-            var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            var eventSpecs = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+                              EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
             InstallEventHandler(GetApplicationEventTarget(), { _, event, userData -> OSStatus in
                 guard let userData, let event else { return noErr }
                 var hkID = EventHotKeyID()
                 GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hkID)
                 let runner = Unmanaged<CatchAppRunner>.fromOpaque(userData).takeUnretainedValue()
-                runner.hotKeyHandlers[hkID.id]?()
+                if GetEventKind(event) == UInt32(kEventHotKeyReleased) {
+                    if hkID.id == 22 { StudioInkOverlay.shared.end() }
+                } else {
+                    runner.hotKeyHandlers[hkID.id]?()
+                }
                 return noErr
-            }, 1, &eventSpec, Unmanaged.passUnretained(self).toOpaque(), nil)
+            }, eventSpecs.count, &eventSpecs, Unmanaged.passUnretained(self).toOpaque(), nil)
             isHotKeyHandlerInstalled = true
         }
 
@@ -260,6 +271,9 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         }
         registerHotKey(id: 21, keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
             ScreenRecordingStudio.shared.presentStudio()
+        }
+        registerHotKey(id: 22, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey | optionKey)) {
+            StudioInkOverlay.shared.begin()
         }
     }
 

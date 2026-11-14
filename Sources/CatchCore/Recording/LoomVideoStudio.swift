@@ -35,15 +35,10 @@ public final class TeleprompterController: ObservableObject {
     @Published public var fontSize: Double {
         didSet { UserDefaults.standard.set(fontSize, forKey: fontSizeKey) }
     }
-    @Published public var hideFromCapture: Bool {
+    @Published public private(set) var hideFromCapture: Bool {
         didSet {
             UserDefaults.standard.set(hideFromCapture, forKey: hideKey)
-            let hidden = hideFromCapture
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.panel?.sharingType = hidden ? .none : .readOnly
-                ScreenRecordingStudio.shared.refreshStreamContentFilter()
-            }
+            panel?.sharingType = hideFromCapture ? .none : .readOnly
         }
     }
     @Published public var isPlaying: Bool = false
@@ -82,9 +77,8 @@ public final class TeleprompterController: ObservableObject {
     }
 
     public func toggleHideFromCapture() {
+        guard ScreenRecordingStudio.shared.state == .idle else { return }
         hideFromCapture.toggle()
-        panel?.sharingType = hideFromCapture ? .none : .readOnly
-        ScreenRecordingStudio.shared.refreshStreamContentFilter()
     }
 
     public init() {
@@ -110,6 +104,11 @@ public final class TeleprompterController: ObservableObject {
     public func show(on screen: NSScreen? = nil) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            let studio = ScreenRecordingStudio.shared
+            if self.hideFromCapture && self.panel == nil && studio.state != .idle {
+                studio.recordingError = "Open the hidden teleprompter before starting a take so Catch can exclude it from the recording."
+                return
+            }
             self.isVisible = true
             if let existing = self.panel {
                 existing.sharingType = self.hideFromCapture ? .none : .readOnly
@@ -276,6 +275,7 @@ public final class TeleprompterController: ObservableObject {
     }
 
     private func startListening() {
+        StudioMicrophoneMeter.shared.stop()
         let session = UUID()
         voiceSession = session
         voiceStatus = .starting
@@ -423,7 +423,7 @@ private struct TeleprompterPanelView: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .help("Click to toggle whether the teleprompter is hidden or visible in screen recordings")
+                .help("Change teleprompter visibility between takes")
 
                 Spacer()
 
@@ -691,12 +691,32 @@ public final class CameraBubbleController: ObservableObject {
     @Published public var isMirrored: Bool = true
     @Published public private(set) var cameraAuthorized: Bool = false
     @Published public private(set) var hasLiveCameraFeed: Bool = false
+    @Published private(set) var cameraError: String?
 
     private var panel: NSPanel?
+    // The main queue owns the preview reference and request token. The session
+    // queue owns starting and stopping the capture session.
+    private var previewSession: AVCaptureSession?
     private var captureSession: AVCaptureSession?
+    private var captureDeviceID: String?
+    private var cameraRequest = UUID()
+    private var disconnectObserver: NSObjectProtocol?
     private let sessionQueue = DispatchQueue(label: "com.catchapp.camerabubble")
 
-    public init() {}
+    public init() {
+        disconnectObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self, self.isVisible, let device = notification.object as? AVCaptureDevice,
+                  self.previewSession?.inputs.contains(where: { ($0 as? AVCaptureDeviceInput)?.device.uniqueID == device.uniqueID }) == true else { return }
+            self.stopCamera()
+            self.cameraError = "\(device.localizedName) disconnected. Choose a camera in Studio."
+        }
+    }
+
+    deinit {
+        if let disconnectObserver { NotificationCenter.default.removeObserver(disconnectObserver) }
+    }
 
     public func show(on screen: NSScreen? = nil) {
         DispatchQueue.main.async { [weak self] in
@@ -742,10 +762,10 @@ public final class CameraBubbleController: ObservableObject {
     }
 
     public func hide() {
-        stopCamera()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.isVisible = false
+            self.stopCamera()
             self.panel?.orderOut(nil)
             self.panel = nil
         }
@@ -782,68 +802,98 @@ public final class CameraBubbleController: ObservableObject {
     }
 
     private func startCameraIfAuthorized() {
+        let request = UUID()
+        cameraRequest = request
+        cameraError = nil
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
         case .authorized:
             cameraAuthorized = true
-            configureSession()
+            configureSession(request: request)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 DispatchQueue.main.async {
-                    self?.cameraAuthorized = granted
+                    guard let self, self.cameraRequest == request, self.isVisible else { return }
+                    self.cameraAuthorized = granted
                     if granted {
-                        self?.configureSession()
+                        self.configureSession(request: request)
+                    } else {
+                        self.cameraError = "Allow Camera access in System Settings."
                     }
                 }
             }
         default:
             cameraAuthorized = false
             hasLiveCameraFeed = false
+            cameraError = "Allow Camera access in System Settings."
         }
     }
 
-    private func configureSession() {
+    func reloadSelectedCamera() {
+        guard isVisible else { return }
+        startCameraIfAuthorized()
+    }
+
+    private func configureSession(request: UUID) {
+        let selectedID = SettingsStore.shared.recordingCameraID
+        hasLiveCameraFeed = false
+        previewSession = nil
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            if let existing = self.captureSession {
-                if !existing.isRunning {
-                    existing.startRunning()
+            do {
+                guard let device = StudioCaptureDevices.resolve(selectedID, mediaType: .video) else {
+                    self.captureSession?.stopRunning()
+                    self.captureSession = nil
+                    throw CameraStartError.unavailable
                 }
-                DispatchQueue.main.async { self.hasLiveCameraFeed = true }
-                return
-            }
-
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-                ?? AVCaptureDevice.default(for: .video),
-                let input = try? AVCaptureDeviceInput(device: device) else {
-                DispatchQueue.main.async { self.hasLiveCameraFeed = false }
-                return
-            }
-
-            let session = AVCaptureSession()
-            session.beginConfiguration()
-            session.sessionPreset = .medium
-            if session.canAddInput(input) {
+                if let existing = self.captureSession, self.captureDeviceID == device.uniqueID, existing.isRunning {
+                    self.publishCamera(existing, error: nil, request: request)
+                    return
+                }
+                self.captureSession?.stopRunning()
+                self.captureSession = nil
+                let input = try AVCaptureDeviceInput(device: device)
+                let session = AVCaptureSession()
+                guard session.canAddInput(input) else { throw CameraStartError.unavailable }
                 session.addInput(input)
+                if session.canSetSessionPreset(.medium) { session.sessionPreset = .medium }
+                session.startRunning()
+                guard session.isRunning else { throw CameraStartError.unavailable }
+                self.captureSession = session
+                self.captureDeviceID = device.uniqueID
+                self.publishCamera(session, error: nil, request: request)
+            } catch {
+                self.publishCamera(nil, error: "Camera could not start: \(error.localizedDescription)", request: request)
             }
-            session.commitConfiguration()
-            session.startRunning()
-            self.captureSession = session
-            DispatchQueue.main.async { self.hasLiveCameraFeed = true }
+        }
+    }
+
+    private enum CameraStartError: LocalizedError {
+        case unavailable
+        var errorDescription: String? { "The selected camera is unavailable." }
+    }
+
+    private func publishCamera(_ session: AVCaptureSession?, error: String?, request: UUID) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.cameraRequest == request, self.isVisible else { return }
+            self.previewSession = session
+            self.hasLiveCameraFeed = session != nil
+            self.cameraError = error
         }
     }
 
     private func stopCamera() {
+        cameraRequest = UUID()
+        previewSession = nil
+        hasLiveCameraFeed = false
         sessionQueue.async { [weak self] in
             self?.captureSession?.stopRunning()
-            DispatchQueue.main.async {
-                self?.hasLiveCameraFeed = false
-            }
+            self?.captureSession = nil
         }
     }
 
     fileprivate var activeSession: AVCaptureSession? {
-        captureSession
+        previewSession
     }
 }
 
@@ -869,9 +919,11 @@ private struct CameraBubbleView: View {
                         Image(systemName: "person.crop.circle.fill")
                             .font(.system(size: dim * 0.34))
                             .foregroundStyle(RaycastTheme.textPrimary.opacity(0.85))
-                        Text(controller.cameraAuthorized ? "Starting Cam..." : "Camera Ready")
+                        Text(controller.cameraError ?? (controller.cameraAuthorized ? "Starting camera…" : "Camera Ready"))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(RaycastTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 10)
                     }
                 }
             }
@@ -1040,6 +1092,9 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
     @Published public var showTeleprompter: Bool = true
     @Published public private(set) var elapsedSeconds: Int = 0
     @Published public private(set) var lastRecordedVideoURL: URL?
+    @Published public var recordingError: String?
+    private var syntheticTake = false
+    private var preparingStopCompletion: (@Sendable (URL?, CaptureHistoryItem?) -> Void)?
 
     private var controlBarPanel: NSPanel?
     private var elapsedTimer: Timer?
@@ -1052,13 +1107,19 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
+    private var microphoneInput: AVAssetWriterInput?
+    private var microphoneSamples = 0
     private var pixelAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var activeOutputURL: URL?
     private var sessionStarted = false
     private var recordedDimensions: CGSize = CGSize(width: 1280, height: 720)
     private var frameCounter: Int64 = 0
+    private var streamFailure: String?
+    private var writerAcceptingSamples = false
+    private var pausedAtHostTime: CMTime?
+    private var removedPauseDuration: CMTime = .zero
 
-    public func presentStudio(initialRect: CGRect? = nil, displayIndex: Int? = nil) {
+    public func presentStudio(initialRect: CGRect? = nil, displayIndex: Int? = nil, showPresenterOverlays: Bool = true) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if let initialRect {
@@ -1067,10 +1128,10 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             }
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: displayIndex)
 
-            if self.showCameraBubble {
+            if showPresenterOverlays && self.showCameraBubble {
                 CameraBubbleController.shared.show(on: screen)
             }
-            if self.showTeleprompter {
+            if showPresenterOverlays && self.showTeleprompter {
                 TeleprompterController.shared.show(on: screen)
             }
 
@@ -1079,8 +1140,8 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 return
             }
 
-            let width: CGFloat = 610
-            let height: CGFloat = 62
+            let width: CGFloat = min(760, screen.visibleFrame.width)
+            let height: CGFloat = 94
             let frame = CGRect(
                 x: screen.frame.midX - width / 2,
                 y: screen.visibleFrame.minY + 28,
@@ -1112,7 +1173,8 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
     }
 
     public func dismissStudio() {
-        if state.isActive {
+        StudioMicrophoneMeter.shared.stop()
+        if state.isActive || state == .preparing {
             stopRecording()
         }
         DispatchQueue.main.async { [weak self] in
@@ -1135,36 +1197,66 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
     }
 
     public func startRecording(outputDirectory: URL? = nil, headlessSynthetic: Bool = false) {
-        guard !state.isActive else { return }
-        DispatchQueue.main.async {
-            self.state = .preparing
-            self.elapsedSeconds = 0
-            self.accumulatedElapsed = 0
-        }
+        guard state == .idle else { return }
+        StudioMicrophoneMeter.shared.stop()
+        recordingError = nil
+        lastRecordedVideoURL = nil
+        state = .preparing
+        elapsedSeconds = 0
+        accumulatedElapsed = 0
+        syntheticTake = headlessSynthetic
+        if !headlessSynthetic { LocalStudioBridge.shared.snapshotForTake() }
 
         let dir = outputDirectory ?? HistoryStore.shared.rootDirectory.appendingPathComponent("Recordings", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            recordingError = "Could not create the recording folder: \(error.localizedDescription)"
+            state = .idle
+            return
+        }
         let fileName = FileNameFormatter.format(pattern: SettingsStore.shared.fileNameFormat)
         let outputURL = dir.appendingPathComponent("\(fileName)-\(UUID().uuidString.prefix(6)).mp4")
-
-        if showTeleprompter && !headlessSynthetic {
-            TeleprompterController.shared.show()
-            TeleprompterController.shared.play()
-        }
+        let wantsMicrophone = includeMicrophone
+        let selectedMicrophoneID = SettingsStore.shared.recordingMicrophoneID
 
         Task {
-            let startedRealStream: Bool
+            let started: Bool
             if headlessSynthetic {
-                startedRealStream = false
-            } else {
-                startedRealStream = await startScreenCaptureKitRecording(to: outputURL)
-            }
-
-            if !startedRealStream {
                 await prepareFallbackWriter(to: outputURL)
+                started = assetWriter != nil
+            } else {
+                let microphoneID = wantsMicrophone ? await prepareMicrophone(selectedID: selectedMicrophoneID) : nil
+                if wantsMicrophone && microphoneID == nil {
+                    started = false
+                } else {
+                    started = await startScreenCaptureKitRecording(to: outputURL, microphoneID: microphoneID)
+                }
             }
 
             await MainActor.run {
+                if self.state == .finishing {
+                    Task {
+                        if let stream = self.scStream { try? await stream.stopCapture() }
+                        self.scStream = nil
+                        self.writerQueue.sync { self.assetWriter?.cancelWriting(); self.assetWriter = nil }
+                        try? FileManager.default.removeItem(at: outputURL)
+                        await MainActor.run {
+                            self.state = .idle
+                            self.preparingStopCompletion?(nil, nil)
+                            self.preparingStopCompletion = nil
+                        }
+                    }
+                    return
+                }
+                guard started else {
+                    self.writerQueue.sync { self.assetWriter?.cancelWriting(); self.assetWriter = nil }
+                    try? FileManager.default.removeItem(at: outputURL)
+                    if self.recordingError == nil { self.recordingError = "Screen recording could not start. Check Screen Recording permission and try again." }
+                    self.state = .idle
+                    return
+                }
+                self.writerQueue.sync { self.writerAcceptingSamples = true }
                 self.activeOutputURL = outputURL
                 self.activeRecordingStart = Date()
                 self.state = .recording(startedAt: Date())
@@ -1173,26 +1265,50 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         }
     }
 
+    private func prepareMicrophone(selectedID: String?) async -> String? {
+        guard #available(macOS 15.0, *) else {
+            await MainActor.run { self.recordingError = "Microphone recording requires macOS 15 or later." }
+            return nil
+        }
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+        guard granted else {
+            await MainActor.run { self.recordingError = "Allow microphone access in System Settings before recording." }
+            return nil
+        }
+        guard let device = StudioCaptureDevices.resolve(selectedID, mediaType: .audio) else {
+            await MainActor.run { self.recordingError = "The selected microphone is unavailable. Choose a connected input in Studio." }
+            return nil
+        }
+        return device.uniqueID
+    }
+
     public func pauseRecording() {
         guard case .recording = state else { return }
         if let start = activeRecordingStart {
             accumulatedElapsed += Date().timeIntervalSince(start)
         }
         activeRecordingStart = nil
+        writerQueue.sync {
+            writerAcceptingSamples = false
+            pausedAtHostTime = CMClockGetTime(CMClockGetHostTimeClock())
+        }
         elapsedTimer?.invalidate()
         elapsedTimer = nil
-        TeleprompterController.shared.pause()
         state = .paused(elapsed: accumulatedElapsed)
     }
 
     public func resumeRecording() {
         guard case .paused = state else { return }
+        writerQueue.sync {
+            if let pausedAtHostTime {
+                removedPauseDuration = CMTimeAdd(removedPauseDuration, CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), pausedAtHostTime))
+            }
+            pausedAtHostTime = nil
+            writerAcceptingSamples = true
+        }
         activeRecordingStart = Date()
         state = .recording(startedAt: Date())
         startElapsedTimer()
-        if showTeleprompter {
-            TeleprompterController.shared.play()
-        }
     }
 
     public func stopRecording(
@@ -1205,13 +1321,17 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             return
         }
 
+        if state == .preparing {
+            state = .finishing
+            preparingStopCompletion = completion
+            return
+        }
         elapsedTimer?.invalidate()
         elapsedTimer = nil
-        TeleprompterController.shared.pause()
-        DispatchQueue.main.async {
-            self.state = .finishing
-        }
+        StudioInkOverlay.shared.clear()
+        state = .finishing
 
+        writerQueue.sync { writerAcceptingSamples = false }
         let capturedStream = scStream
         scStream = nil
         let outputURL = activeOutputURL
@@ -1223,11 +1343,14 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 try? await capturedStream.stopCapture()
             }
 
+            let succeeded: Bool
             if let outputURL {
-                await finalizeWriter(outputURL: outputURL, fallbackSize: size, fps: fps)
+                succeeded = await finalizeWriter(outputURL: outputURL, fallbackSize: size, fps: fps)
+            } else {
+                succeeded = false
             }
 
-            let finalURL = outputURL
+            let finalURL = succeeded ? outputURL : nil
             var historyItem: CaptureHistoryItem?
             if let finalURL,
                let videoData = try? Data(contentsOf: finalURL),
@@ -1241,22 +1364,20 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     mediaType: .video,
                     fileExtension: "mp4"
                 )
-                if presentQuickAccess, let item = historyItem {
-                    let result = CaptureResult(
-                        image: poster,
-                        encodedData: videoData,
-                        fileName: title,
-                        format: .png,
-                        sourceRect: CGRect(origin: .zero, size: size),
-                        displayScale: 1.0
-                    )
-                    QuickAccessOverlayManager.shared.present(result: result, historyItem: item)
+                if presentQuickAccess {
+                    TakeReviewWindowController.shared.show(url: finalURL)
                 }
             }
 
             let createdItem = historyItem
             await MainActor.run {
                 self.lastRecordedVideoURL = finalURL
+                if let finalURL, !self.syntheticTake {
+                    do { try LocalStudioBridge.shared.saveHandoff(for: finalURL) }
+                    catch { self.recordingError = "The video was saved, but its edit handoff could not be written: \(error.localizedDescription)" }
+                }
+                self.activeOutputURL = nil
+                if !succeeded { self.recordingError = "Recording did not produce a valid video. No take was added to History." }
                 self.state = .idle
                 completion?(finalURL, createdItem)
             }
@@ -1275,12 +1396,13 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         elapsedTimer = timer
     }
 
-    private func startScreenCaptureKitRecording(to outputURL: URL) async -> Bool {
+    private func startScreenCaptureKitRecording(to outputURL: URL, microphoneID: String?) async -> Bool {
         guard CGPreflightScreenCaptureAccess() else {
+            await MainActor.run { self.recordingError = "Screen Recording permission is required. Allow Catch in System Settings and restart it." }
             return false
         }
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: nil)
             let targetDisplayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
                 ?? CGMainDisplayID()
@@ -1300,7 +1422,12 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 }
                 return ids
             }
-            let filter = Self.buildContentFilter(display: display, windows: content.windows, excludedIDs: excludedIDs)
+            guard let filter = Self.buildContentFilter(display: display, windows: content.windows, excludedIDs: excludedIDs) else {
+                await MainActor.run {
+                    self.recordingError = "Catch could not exclude a private presenter window. Close the teleprompter or reopen Studio before retrying."
+                }
+                return false
+            }
             let scale = SettingsStore.shared.recordingScaleRetinaTo1x ? 1.0 : max(1.0, screen.backingScaleFactor)
             let region = (captureMode == .area ? selectedRect : nil) ?? screen.frame
             let targetWidth = max(320, (Int(region.width * scale) / 2) * 2)
@@ -1314,6 +1441,10 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = true
             config.capturesAudio = includeSystemAudio
+            if #available(macOS 15.0, *) {
+                config.captureMicrophone = microphoneID != nil
+                config.microphoneCaptureDeviceID = microphoneID
+            }
 
             if captureMode == .area, let rect = selectedRect {
                 let relativeX = max(0, rect.minX - screen.frame.minX)
@@ -1325,7 +1456,8 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 to: outputURL,
                 width: targetWidth,
                 height: targetHeight,
-                includeAudio: includeSystemAudio
+                includeAudio: includeSystemAudio,
+                includeMicrophone: microphoneID != nil
             )
             guard writerConfigured else { return false }
 
@@ -1333,7 +1465,10 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             let stream = SCStream(filter: filter, configuration: config, delegate: handler)
             try stream.addStreamOutput(handler, type: .screen, sampleHandlerQueue: writerQueue)
             if includeSystemAudio {
-                try? stream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: writerQueue)
+                try stream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: writerQueue)
+            }
+            if #available(macOS 15.0, *), microphoneID != nil {
+                try stream.addStreamOutput(handler, type: .microphone, sampleHandlerQueue: writerQueue)
             }
             try await stream.startCapture()
 
@@ -1341,38 +1476,14 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             self.scStream = stream
             return true
         } catch {
+            await MainActor.run { self.recordingError = "Screen capture could not start: \(error.localizedDescription)" }
             return false
         }
     }
 
-    public func refreshStreamContentFilter() {
-        guard let scStream else { return }
-        var excludedIDs: Set<CGWindowID> = []
-        if TeleprompterController.shared.hideFromCapture,
-           let tpNum = TeleprompterController.shared.windowNumber,
-           tpNum > 0 {
-            excludedIDs.insert(CGWindowID(tpNum))
-        }
-        if let ctrlNum = controlBarPanel?.windowNumber, ctrlNum > 0 {
-            excludedIDs.insert(CGWindowID(ctrlNum))
-        }
-        Task {
-            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
-                return
-            }
-            let screen = CaptureEngine.shared.resolveScreen(displayIndex: nil)
-            let targetDisplayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
-                ?? CGMainDisplayID()
-            guard let display = content.displays.first(where: { $0.displayID == targetDisplayID }) ?? content.displays.first else {
-                return
-            }
-            let filter = Self.buildContentFilter(display: display, windows: content.windows, excludedIDs: excludedIDs)
-            try? await scStream.updateContentFilter(filter)
-        }
-    }
-
-    private static func buildContentFilter(display: SCDisplay, windows: [SCWindow], excludedIDs: Set<CGWindowID>) -> SCContentFilter {
+    private static func buildContentFilter(display: SCDisplay, windows: [SCWindow], excludedIDs: Set<CGWindowID>) -> SCContentFilter? {
         let excludedWindows = windows.filter { excludedIDs.contains($0.windowID) }
+        guard Set(excludedWindows.map(\.windowID)) == excludedIDs else { return nil }
         return SCContentFilter(display: display, excludingWindows: excludedWindows)
     }
 
@@ -1382,7 +1493,7 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         _ = setupAssetWriter(to: outputURL, width: w, height: h, includeAudio: false)
     }
 
-    private func setupAssetWriter(to outputURL: URL, width: Int, height: Int, includeAudio: Bool) -> Bool {
+    private func setupAssetWriter(to outputURL: URL, width: Int, height: Int, includeAudio: Bool, includeMicrophone: Bool = false) -> Bool {
         writerQueue.sync {
             try? FileManager.default.removeItem(at: outputURL)
             guard let writer = try? AVAssetWriter(outputURL: outputURL, fileType: .mp4) else {
@@ -1424,18 +1535,37 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 ]
                 let candidate = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
                 candidate.expectsMediaDataInRealTime = true
-                if writer.canAdd(candidate) {
-                    writer.add(candidate)
-                    aInput = candidate
-                }
+                guard writer.canAdd(candidate) else { return false }
+                writer.add(candidate)
+                aInput = candidate
             }
 
+            var micInput: AVAssetWriterInput?
+            if includeMicrophone {
+                let settings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderBitRateKey: 96_000
+                ]
+                let candidate = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+                candidate.expectsMediaDataInRealTime = true
+                guard writer.canAdd(candidate) else { return false }
+                writer.add(candidate)
+                micInput = candidate
+            }
             self.assetWriter = writer
+            self.microphoneInput = micInput
+            self.microphoneSamples = 0
             self.videoInput = vInput
             self.audioInput = aInput
             self.pixelAdaptor = adaptor
             self.sessionStarted = false
             self.frameCounter = 0
+            self.streamFailure = nil
+            self.writerAcceptingSamples = false
+            self.pausedAtHostTime = nil
+            self.removedPauseDuration = .zero
             self.recordedDimensions = CGSize(width: width, height: height)
             return true
         }
@@ -1445,10 +1575,12 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         writerQueue.async { [weak self] in
             guard let self,
                   let writer = self.assetWriter,
-                  self.isRecordingActiveUnsafe else { return }
+                  self.writerAcceptingSamples,
+                  let sampleBuffer = Self.removingPause(self.removedPauseDuration, from: sampleBuffer) else { return }
 
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             if !self.sessionStarted {
+                guard type == .screen else { return }
                 writer.startWriting()
                 writer.startSession(atSourceTime: pts)
                 self.sessionStarted = true
@@ -1457,34 +1589,72 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             switch type {
             case .screen:
                 if let vInput = self.videoInput, vInput.isReadyForMoreMediaData {
-                    vInput.append(sampleBuffer)
-                    self.frameCounter += 1
+                    if vInput.append(sampleBuffer) {
+                        self.frameCounter += 1
+                    } else {
+                        self.streamFailure = writer.error?.localizedDescription ?? "Video writer rejected a frame."
+                    }
                 }
             case .audio:
                 if let aInput = self.audioInput, aInput.isReadyForMoreMediaData {
-                    aInput.append(sampleBuffer)
+                    if !aInput.append(sampleBuffer) {
+                        self.streamFailure = writer.error?.localizedDescription ?? "Audio writer rejected a sample."
+                    }
                 }
             default:
-                break
+                if #available(macOS 15.0, *), type == .microphone,
+                   let input = self.microphoneInput, input.isReadyForMoreMediaData {
+                    if input.append(sampleBuffer) {
+                        self.microphoneSamples += 1
+                    } else {
+                        self.streamFailure = writer.error?.localizedDescription ?? "Microphone writer rejected a sample."
+                    }
+                }
             }
         }
     }
 
-    private var isRecordingActiveUnsafe: Bool {
-        if case .recording = state { return true }
-        return false
+    fileprivate func streamStopped(with error: Error) {
+        writerQueue.async { [weak self] in
+            self?.streamFailure = error.localizedDescription
+            DispatchQueue.main.async {
+                guard let self, self.state.isActive else { return }
+                self.stopRecording(presentQuickAccess: false) { _, _ in
+                    DispatchQueue.main.async {
+                        self.recordingError = "Screen capture stopped unexpectedly: \(error.localizedDescription). The take was not added to History."
+                    }
+                }
+            }
+        }
     }
 
-    private func finalizeWriter(outputURL: URL, fallbackSize: CGSize, fps: Int) async {
+    private static func removingPause(_ offset: CMTime, from sample: CMSampleBuffer) -> CMSampleBuffer? {
+        guard CMTimeCompare(offset, .zero) > 0 else { return sample }
+        var count = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr, count > 0 else { return nil }
+        var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: count, arrayToFill: &timings, entriesNeededOut: &count) == noErr else { return nil }
+        for index in timings.indices {
+            timings[index].presentationTimeStamp = CMTimeSubtract(timings[index].presentationTimeStamp, offset)
+            if timings[index].decodeTimeStamp.isValid {
+                timings[index].decodeTimeStamp = CMTimeSubtract(timings[index].decodeTimeStamp, offset)
+            }
+        }
+        var adjusted: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: sample, sampleTimingEntryCount: count, sampleTimingArray: &timings, sampleBufferOut: &adjusted) == noErr else { return nil }
+        return adjusted
+    }
+
+    private func finalizeWriter(outputURL: URL, fallbackSize: CGSize, fps: Int) async -> Bool {
         await withCheckedContinuation { continuation in
             writerQueue.async { [weak self] in
                 guard let self, let writer = self.assetWriter else {
-                    continuation.resume()
+                    continuation.resume(returning: false)
                     return
                 }
 
-                // If zero SCStream frames arrived (e.g. headless CI test mode), write synthetic frames so MP4 is valid
-                if !self.sessionStarted,
+                // Synthetic frames are reserved for the explicit fixture path.
+                if self.syntheticTake && !self.sessionStarted,
                    let vInput = self.videoInput,
                    let adaptor = self.pixelAdaptor {
                     writer.startWriting()
@@ -1505,16 +1675,25 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     }
                 }
 
+                guard self.sessionStarted, self.streamFailure == nil,
+                      self.syntheticTake || (self.frameCounter > 0 && (self.microphoneInput == nil || self.microphoneSamples > 0)) else {
+                    writer.cancelWriting()
+                    self.assetWriter = nil
+                    continuation.resume(returning: false)
+                    return
+                }
                 self.videoInput?.markAsFinished()
                 self.audioInput?.markAsFinished()
+                self.microphoneInput?.markAsFinished()
 
                 writer.finishWriting {
                     self.assetWriter = nil
                     self.videoInput = nil
                     self.audioInput = nil
+                    self.microphoneInput = nil
                     self.pixelAdaptor = nil
                     self.sessionStarted = false
-                    continuation.resume()
+                    continuation.resume(returning: writer.status == .completed)
                 }
             }
         }
@@ -1573,7 +1752,7 @@ private final class RecordingStreamOutput: NSObject, SCStreamOutput, SCStreamDel
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        // Controlled via ScreenRecordingStudio lifecycle
+        studio?.streamStopped(with: error)
     }
 }
 
@@ -1583,6 +1762,25 @@ private struct LoomStudioBarView: View {
     @ObservedObject var studio: ScreenRecordingStudio
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            transport
+            StudioInputSelectors(studio: studio, compact: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .raycastLiquidGlass(cornerRadius: 18, tintAlpha: 0.85)
+        .preferredColorScheme(.dark)
+        .alert("Recording error", isPresented: Binding(
+            get: { studio.recordingError != nil },
+            set: { if !$0 { studio.recordingError = nil } }
+        )) {
+            Button("OK", role: .cancel) { studio.recordingError = nil }
+        } message: {
+            Text(studio.recordingError ?? "")
+        }
+    }
+
+    private var transport: some View {
         HStack(spacing: 10) {
             // Live indicator & timer
             HStack(spacing: 6) {
@@ -1636,11 +1834,13 @@ private struct LoomStudioBarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(studio.state != .idle)
             .help("Toggle Camera Bubble")
 
             // Microphone Toggle
             Button {
                 studio.includeMicrophone.toggle()
+                if !studio.includeMicrophone { StudioMicrophoneMeter.shared.stop() }
             } label: {
                 Image(systemName: studio.includeMicrophone ? "mic.fill" : "mic.slash.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -1654,7 +1854,9 @@ private struct LoomStudioBarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(studio.state != .idle)
             .help("Toggle Microphone")
+            if studio.includeMicrophone && studio.state == .idle { StudioMicrophoneMeterView() }
 
             // Teleprompter Toggle
             Button {
@@ -1677,12 +1879,16 @@ private struct LoomStudioBarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(studio.state != .idle)
             .help("Toggle Hidden Teleprompter")
 
             Spacer()
 
             // Transport Record / Pause / Stop
             if studio.state.isActive {
+                Button("Clear Ink") { StudioInkOverlay.shared.clear() }
+                    .help("Hold Option-Shift-Command-D to draw")
+                    .controlSize(.small)
                 Button {
                     if case .paused = studio.state {
                         studio.resumeRecording()
@@ -1704,14 +1910,21 @@ private struct LoomStudioBarView: View {
                 .tint(RaycastTheme.accent)
                 .controlSize(.small)
             } else {
-                Button {
-                    studio.startRecording()
-                } label: {
-                    Label("Record", systemImage: "record.circle")
+                if studio.state == .preparing {
+                    Button("Cancel") { studio.stopRecording() }
+                        .controlSize(.small)
+                } else if studio.state == .finishing {
+                    Text("Finishing…").foregroundStyle(RaycastTheme.textSecondary)
+                } else {
+                    Button {
+                        studio.startRecording()
+                    } label: {
+                        Label("Record", systemImage: "record.circle")
+                    }
+                    .raycastGlassButton(prominent: true)
+                    .tint(RaycastTheme.accent)
+                    .controlSize(.small)
                 }
-                .raycastGlassButton(prominent: true)
-                .tint(RaycastTheme.accent)
-                .controlSize(.small)
 
                 Button {
                     studio.dismissStudio()
@@ -1723,10 +1936,6 @@ private struct LoomStudioBarView: View {
                 .foregroundStyle(RaycastTheme.textSecondary)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .raycastLiquidGlass(cornerRadius: 18, tintAlpha: 0.85)
-        .preferredColorScheme(.dark)
     }
 
     private var isPaused: Bool {

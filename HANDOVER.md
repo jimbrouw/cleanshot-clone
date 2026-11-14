@@ -37,6 +37,16 @@ After a valid take, open a local playback view with start/end trim, **Export Cop
 
 **Acceptance:** Record a clip with a clear intro and outro, trim both ends, and play the exported copy. Confirm the intended cut, retained narration and sync, and intact original. An export failure must report an error and leave the source playable.
 
+## 4. Add a local MCP bridge
+
+Build this after the recorder passes milestone 1. Put the companion launcher in `scripts/` and document how a local MCP client starts it. Use [MCP over stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio) and a private local connection to the running Catch app. Make agent access opt-in within Catch and preserve the existing default for `catch://`.
+
+1. **Load a teleprompter script.** Accept script text and optional edit notes as separate fields. Preserve line breaks and bracketed stage directions. Load the script into the running teleprompter and keep the notes with the take. Start reading or recording only on a separate command.
+2. **Control capture and recording.** Expose a screenshot action and start, pause, resume, stop, and status for Studio. Use Catch's existing capture and recorder paths. Report permission failures and invalid state transitions. Return the finalized recording path after the writer succeeds.
+3. **Hand off a finished recording for editing.** Let the editing agent retrieve an explicitly selected take with its local MP4 path, script, and edit notes. Save a portable handoff alongside the media or as an export folder for a human editor. Include timestamps only when Catch measured them. Keep the source intact and let the user select what leaves the Mac.
+
+**Acceptance:** From a local MCP client, load a two-part script with a silent cue, capture a screenshot of a harmless screen, then start, pause, resume, and stop a short test recording. Play the returned MP4. Retrieve that take from an editing client and verify the file, script, and notes match. Check that a disabled bridge refuses commands and that unfinished or unselected takes are unavailable to the editing client.
+
 ## Later, after a real demo passes
 
 Use the existing CueOS and RoughCut work if a first edit still takes too much time. [CueOS](https://github.com/jimbrouw/cueOS) has an Edit Map and Premiere review-marker prototype that can distinguish a fixture retake from a candidate. `/Users/jim/Developer/Roughcut/src/xmlCutHost.ts` has the separate XML path for creating a new editable Premiere sequence. The handoff between them and a real scripted take have yet to be proven. Hosted video links, comments, analytics, and a full whiteboard are outside this pass.

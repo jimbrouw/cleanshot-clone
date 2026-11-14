@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import CoreGraphics
+import AVFoundation
 @testable import CatchCore
 
 final class CatchTests: XCTestCase {
@@ -580,4 +581,169 @@ final class CatchTests: XCTestCase {
         }
         wait(for: [exp], timeout: 6.0)
     }
+    func testStudioStopDuringPreparationDoesNotPublishTake() {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("CatchCancelled-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let studio = ScreenRecordingStudio()
+        let finished = expectation(description: "Cancelled preparation finishes without a take")
+        studio.startRecording(outputDirectory: tempDir, headlessSynthetic: true)
+        XCTAssertEqual(studio.state, .preparing)
+        studio.stopRecording(presentQuickAccess: false) { url, item in
+            XCTAssertNil(url)
+            XCTAssertNil(item)
+            XCTAssertEqual(studio.state, .idle)
+            XCTAssertNil(studio.lastRecordedVideoURL)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 6)
+        XCTAssertTrue((try? FileManager.default.contentsOfDirectory(atPath: tempDir.path).isEmpty) ?? true)
+    }
+
+    @MainActor
+    func testLocalMCPBridgeScriptAndDisabledBoundary() async throws {
+        let bridge = LocalStudioBridge.shared
+        let previousScript = TeleprompterController.shared.scriptText
+        let previousNotes = bridge.editNotes
+        defer {
+            bridge.disable()
+            TeleprompterController.shared.scriptText = previousScript
+            bridge.editNotes = previousNotes
+        }
+        bridge.enable()
+        XCTAssertTrue(bridge.enabled, bridge.error ?? "bridge did not start")
+        bridge.beginCaptureSession()
+        let captureKey = try XCTUnwrap(bridge.captureKey)
+        let complete = expectation(description: "MCP client uses running bridge")
+        let script = "First line\n[Silent cue]\nSecond line"
+        let notes = "Cut after the cue."
+        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("scripts/catch-studio-mcp.py")
+        DispatchQueue.global().async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = [source.path]
+            process.environment = ProcessInfo.processInfo.environment.merging(["CATCH_CAPTURE_KEY": captureKey]) { _, key in key }
+            let input = Pipe(), output = Pipe()
+            process.standardInput = input
+            process.standardOutput = output
+            do {
+                try process.run()
+                let messages: [[String: Any]] = [
+                    ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": [:]],
+                    ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "load_script", "arguments": ["script": script, "edit_notes": notes]]],
+                    ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "selected_take", "arguments": [:]]],
+                    ["jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": [1]],
+                    ["jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": ["name": "status", "arguments": [:]]]
+                ]
+                for message in messages {
+                    let data = try JSONSerialization.data(withJSONObject: message)
+                    input.fileHandleForWriting.write(data + Data([10]))
+                }
+                try input.fileHandleForWriting.close()
+                let result = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                let lines = String(decoding: result, as: UTF8.self).split(separator: "\n")
+                XCTAssertEqual(lines.count, 5)
+                guard lines.count == 5 else { complete.fulfill(); return }
+                XCTAssertTrue(lines[1].contains("isError"))
+                XCTAssertTrue(lines[1].contains("false"))
+                XCTAssertTrue(lines[2].contains("Select a finished take"))
+                XCTAssertTrue(lines[3].contains("Tool params must be an object"))
+                XCTAssertTrue(lines[4].contains("idle"))
+            } catch { XCTFail("MCP client failed: \(error)") }
+            complete.fulfill()
+        }
+        await fulfillment(of: [complete], timeout: 10)
+        XCTAssertEqual(TeleprompterController.shared.scriptText, script)
+        XCTAssertEqual(bridge.editNotes, notes)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fixture = ScreenRecordingStudio()
+        let history = HistoryStore(rootDirectory: dir.appendingPathComponent("History"))
+        fixture.startRecording(outputDirectory: dir, headlessSynthetic: true)
+        for _ in 0..<100 where !fixture.state.isActive {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let completedURL: URL? = await withCheckedContinuation { continuation in
+            fixture.stopRecording(historyStore: history, presentQuickAccess: false) { url, _ in
+                continuation.resume(returning: url)
+            }
+        }
+        let url = try XCTUnwrap(completedURL)
+        let sidecar = url.deletingPathExtension().appendingPathExtension("handoff.json")
+        bridge.snapshotForTake()
+        try bridge.saveHandoff(for: url)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+        bridge.editNotes = notes
+        bridge.includeNotesInNextTake = true
+        bridge.snapshotForTake()
+        try bridge.saveHandoff(for: url)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: sidecar)) as? [String: Any])
+        XCTAssertEqual(object["script"] as? String, script)
+        XCTAssertEqual(object["edit_notes"] as? String, notes)
+        let fake = dir.appendingPathComponent("fake.mp4")
+        try Data("fixture-only".utf8).write(to: fake)
+        bridge.includeNotesInNextTake = true
+        bridge.snapshotForTake()
+        try bridge.saveHandoff(for: fake)
+        do {
+            try await bridge.selectTake(fake)
+            XCTFail("A non-playable MP4 was selected")
+        } catch {}
+        try await bridge.selectTake(url)
+        bridge.endCaptureSession()
+        let selected = expectation(description: "Editing client receives selected fixture")
+        DispatchQueue.global().async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = [source.path]
+            process.environment = ProcessInfo.processInfo.environment.filter { $0.key != "CATCH_CAPTURE_KEY" }
+            let input = Pipe(), output = Pipe()
+            process.standardInput = input
+            process.standardOutput = output
+            do {
+                try process.run()
+                let request: [String: Any] = ["jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": ["name": "selected_take", "arguments": [:]]]
+                input.fileHandleForWriting.write(try JSONSerialization.data(withJSONObject: request) + Data([10]))
+                try input.fileHandleForWriting.close()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                let outer = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                let result = try XCTUnwrap(outer["result"] as? [String: Any])
+                let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+                let text = try XCTUnwrap(content.first?["text"] as? String)
+                let take = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+                XCTAssertEqual(take["mp4_path"] as? String, url.path)
+                XCTAssertEqual(take["script"] as? String, script)
+                XCTAssertEqual(take["edit_notes"] as? String, notes)
+            } catch { XCTFail("Editing client failed: \(error)") }
+            selected.fulfill()
+        }
+        await fulfillment(of: [selected], timeout: 10)
+        bridge.disable()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: bridge.socketPath))
+    }
+
+    func testTrimExportWithExternalMediaFixture() async throws {
+        guard let path = ProcessInfo.processInfo.environment["CATCH_TRIM_FIXTURE"] else { throw XCTSkip("No optional media fixture supplied") }
+        let source = URL(fileURLWithPath: path)
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("CatchTrim-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let done = expectation(description: "Trim finished")
+        TakeTrimmer.export(source: source, destination: destination, start: 1, end: 3) { result in
+            if case .failure(let error) = result { XCTFail("Trim failed: \(error)") }
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 15)
+        let asset = AVURLAsset(url: destination)
+        let duration = try await asset.load(.duration)
+        let video = try await asset.loadTracks(withMediaType: .video)
+        let audio = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertGreaterThan(duration.seconds, 1.5)
+        XCTAssertLessThan(duration.seconds, 2.5)
+        XCTAssertEqual(video.count, 1)
+        XCTAssertEqual(audio.count, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
 }

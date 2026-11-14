@@ -28,6 +28,8 @@
     <string>Catch needs Screen Recording access to capture screenshots, windows, screen recordings, scrolling content, and on-device OCR text.</string>
     <key>NSCameraUsageDescription</key>
     <string>Catch needs Camera access for the floating picture-in-picture webcam bubble during Loom-style screen recordings.</string>
+    <key>NSCameraUseContinuityCameraDeviceType</key>
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Catch uses the microphone for voiceover, voice-controlled scrolling, and on-device script matching.</string>
     <key>CFBundleURLTypes</key>

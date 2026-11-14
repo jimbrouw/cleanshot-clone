@@ -308,8 +308,7 @@ public final class CaptureEngine: ObservableObject {
     }
 
     public func captureDisplayCGImage(screen: NSScreen, includeCursor: Bool) -> CGImage {
-        let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
-        if let cgImage = CGDisplayCreateImage(displayID) {
+        if let cgImage = captureDisplayCGImageIfAvailable(screen: screen) {
             return cgImage
         }
         return Self.makeSyntheticImage(
@@ -317,6 +316,11 @@ public final class CaptureEngine: ObservableObject {
             height: max(100, Int(screen.frame.height)),
             label: "Catch Capture"
         )
+    }
+
+    public func captureDisplayCGImageIfAvailable(screen: NSScreen) -> CGImage? {
+        let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
+        return CGDisplayCreateImage(displayID)
     }
 
     public func finalizeCapture(

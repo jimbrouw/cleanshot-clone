@@ -180,6 +180,8 @@ public final class SettingsStore: ObservableObject {
     @Published public var recordingFrameRate: Int { didSet { save("recordingFrameRate", recordingFrameRate) } }
     @Published public var recordingScaleRetinaTo1x: Bool { didSet { save("recordingScaleRetinaTo1x", recordingScaleRetinaTo1x) } }
     @Published public var recordingRecordSystemAudio: Bool { didSet { save("recordingRecordSystemAudio", recordingRecordSystemAudio) } }
+    @Published public var recordingCameraID: String? { didSet { save("recordingCameraID", recordingCameraID) } }
+    @Published public var recordingMicrophoneID: String? { didSet { save("recordingMicrophoneID", recordingMicrophoneID) } }
     @Published public var recordingGifFrameRate: Int { didSet { save("recordingGifFrameRate", recordingGifFrameRate) } }
 
     // MARK: - Annotate
@@ -274,6 +276,8 @@ public final class SettingsStore: ObservableObject {
         self.recordingFrameRate = defaults.object(forKey: keyPrefix + "recordingFrameRate") as? Int ?? 60
         self.recordingScaleRetinaTo1x = defaults.object(forKey: keyPrefix + "recordingScaleRetinaTo1x") as? Bool ?? false
         self.recordingRecordSystemAudio = defaults.object(forKey: keyPrefix + "recordingRecordSystemAudio") as? Bool ?? true
+        self.recordingCameraID = defaults.string(forKey: keyPrefix + "recordingCameraID")
+        self.recordingMicrophoneID = defaults.string(forKey: keyPrefix + "recordingMicrophoneID")
         self.recordingGifFrameRate = defaults.object(forKey: keyPrefix + "recordingGifFrameRate") as? Int ?? 15
 
         self.inverseArrowDirection = defaults.object(forKey: keyPrefix + "inverseArrowDirection") as? Bool ?? false
