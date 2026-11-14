@@ -67,6 +67,10 @@ final class CatchTests: XCTestCase {
 
         let defaults = UserDefaults(suiteName: "test.url.\(UUID().uuidString)")!
         let settings = SettingsStore(defaults: defaults)
+        XCTAssertFalse(settings.allowURLSchemeAPI)
+        XCTAssertFalse(settings.clipboardHistoryEnabled)
+        XCTAssertFalse(URLSchemeRouter.execute(url: URL(string: "catch://capture-fullscreen")!, settings: settings, dryRun: true))
+        settings.allowURLSchemeAPI = true
 
         for str in urls {
             let url = URL(string: str)!
@@ -227,7 +231,7 @@ final class CatchTests: XCTestCase {
 
     // 8. Cloud Upload & Contextual Comments Server
     @MainActor
-    func testCloudUploadAndCommentsServer() async {
+    func testCloudUploadAndCommentsServer() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CloudTest-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -235,13 +239,46 @@ final class CatchTests: XCTestCase {
         let img = CaptureEngine.makeSyntheticImage(width: 120, height: 90, label: "Cloud")
         let png = CatchDocument.pngData(from: img)!
 
-        let uploaded = await cloud.upload(image: img, data: png, title: "Cloud Shot", tags: ["review"])
-        XCTAssertNotNil(uploaded)
-        XCTAssertTrue(uploaded!.shareURL.contains("/s/\(uploaded!.id)"))
+        let refused = await cloud.upload(image: img, data: png, title: "Private", password: "test-password")
+        XCTAssertNil(refused)
+        XCTAssertEqual(cloud.serverPort, 0)
+        let result = await cloud.upload(image: img, data: png, title: "<script>bad()</script>", tags: ["review"])
+        let uploaded = try XCTUnwrap(result)
+        XCTAssertNotNil(UUID(uuidString: uploaded.id))
+        XCTAssertTrue(uploaded.shareURL.contains("/s/\(uploaded.id)"))
 
-        let comment = cloud.addComment(toShareID: uploaded!.id, author: "Alex", text: "Looks sharp!", x: 45, y: 60)
+        let comment = cloud.addComment(toShareID: uploaded.id, author: "Alex", text: "Looks sharp!", x: 45, y: 60)
         XCTAssertNotNil(comment)
-        XCTAssertEqual(cloud.item(forShareID: uploaded!.id)?.comments.count, 1)
+        XCTAssertEqual(cloud.item(forShareID: uploaded.id)?.comments.count, 1)
+
+        let url = try XCTUnwrap(URL(string: uploaded.shareURL))
+        let (body, response) = try await URLSession.shared.data(from: url)
+        let http = try XCTUnwrap(response as? HTTPURLResponse)
+        XCTAssertEqual(http.statusCode, 200)
+        XCTAssertEqual(http.value(forHTTPHeaderField: "Cache-Control"), "no-store")
+        let html = String(decoding: body, as: UTF8.self)
+        XCTAssertTrue(html.contains("&lt;script&gt;"))
+        XCTAssertFalse(html.contains("<script>"))
+
+        var post = URLRequest(url: url.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("api/comments/\(uploaded.id)"))
+        post.httpMethod = "POST"
+        let (_, denied) = try await URLSession.shared.data(for: post)
+        XCTAssertEqual((denied as? HTTPURLResponse)?.statusCode, 405)
+
+        let indexURL = dir.appendingPathComponent("uploads.json")
+        var oldIndex = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: indexURL)) as? [[String: Any]])
+        oldIndex[0]["passwordHash"] = "legacy-test-password"
+        try JSONSerialization.data(withJSONObject: oldIndex).write(to: indexURL)
+
+        let relaunch = CloudUploadService(storageDirectory: dir)
+        XCTAssertEqual(relaunch.recentUploads.first?.id, uploaded.id)
+        XCTAssertFalse(try String(contentsOf: indexURL, encoding: .utf8).contains("legacy-test-password"))
+        let port = relaunch.ensureServerStarted()
+        XCTAssertNotEqual(port, 0)
+        let staleURL = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/s/\(uploaded.id)"))
+        let (_, stale) = try await URLSession.shared.data(from: staleURL)
+        XCTAssertEqual((stale as? HTTPURLResponse)?.statusCode, 404)
     }
 
     func testOnboardingAndPermissionsManager() {

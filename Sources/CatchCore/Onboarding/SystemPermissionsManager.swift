@@ -65,9 +65,6 @@ public final class SystemPermissionsManager: ObservableObject {
     @discardableResult
     public func requestScreenRecording() -> Bool {
         let granted = CGRequestScreenCaptureAccess()
-        if !granted {
-            openScreenRecordingSettings()
-        }
         refreshStatus()
         return granted
     }
@@ -77,9 +74,6 @@ public final class SystemPermissionsManager: ObservableObject {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [promptKey: true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(options)
-        if !trusted {
-            openAccessibilitySettings()
-        }
         refreshStatus()
         return trusted
     }

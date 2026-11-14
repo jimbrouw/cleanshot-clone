@@ -255,7 +255,7 @@ private struct QuickAccessCardView: View {
                                 Button("Save") { saveAction() }
                                 Button("Annotate") { annotateAction() }
                                 Button("Pin to the Screen") { pinAction() }
-                                Button("Upload to Cloud") { uploadAction() }
+                                Button("Copy Local Preview Link") { uploadAction() }
                                 Divider()
                                 Button("Quick Look") { quickLookAction() }
                                 Button("Show in Finder") { showInFinderAction() }
@@ -302,7 +302,7 @@ private struct QuickAccessCardView: View {
                     actionBtn(systemImage: "square.and.arrow.down", label: "Save", help: "Save to Disk", action: saveAction)
                     actionBtn(systemImage: "pencil.tip.crop.circle", label: "Edit", help: "Open Annotate Studio", action: annotateAction)
                     actionBtn(systemImage: "pin", label: "Pin", help: "Pin Floating Window", action: pinAction)
-                    actionBtn(systemImage: "icloud.and.arrow.up", label: "Cloud", help: "Upload & Copy Link", action: uploadAction)
+                    actionBtn(systemImage: "link", label: "Link", help: "Copy Local Preview Link", action: uploadAction)
                     actionBtn(systemImage: "trash", label: "Drop", help: "Discard Card", isDestructive: true) {
                         manager.closeCard(id: card.id)
                     }
@@ -432,7 +432,7 @@ private struct QuickAccessCardView: View {
     }
 
     private func uploadAction() {
-        uploadStatus = "Uploading..."
+        uploadStatus = "Creating local link…"
         Task { @MainActor in
             let uploaded = await CloudUploadService.shared.upload(
                 image: card.result.image,

@@ -30,6 +30,8 @@ let package = Package(
                 .linkedFramework("UniformTypeIdentifiers"),
                 .linkedFramework("Network"),
                 .linkedFramework("AVFoundation"),
+                .linkedFramework("SoundAnalysis"),
+                .linkedFramework("Speech"),
                 .linkedLibrary("sqlite3")
             ]
         ),

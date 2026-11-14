@@ -497,12 +497,12 @@ public struct AnnotateEditorView: View {
                     RaycastKeycapBadge("⌘S").scaleEffect(0.82)
                 }
             }
-            Button("Upload to Cloud") {
+            Button("Copy Local Preview Link") {
                 let cg = viewModel.renderedComposite
                 let data = ImagePostProcessor.encode(image: cg, format: .png) ?? Data()
                 Task { @MainActor in
                     let uploaded = await CloudUploadService.shared.upload(image: cg, data: data, title: viewModel.title)
-                    viewModel.statusMessage = uploaded != nil ? "Uploaded & link copied" : "Upload failed"
+                    viewModel.statusMessage = uploaded != nil ? "Local link copied" : "Couldn’t create local link"
                 }
             }
             .buttonStyle(.borderedProminent)

@@ -29,7 +29,7 @@
     <key>NSCameraUsageDescription</key>
     <string>Catch needs Camera access for the floating picture-in-picture webcam bubble during Loom-style screen recordings.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Catch needs Microphone access to record your voiceover alongside screen and camera captures.</string>
+    <string>Catch uses the microphone for voiceover, voice-controlled scrolling, and on-device script matching.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

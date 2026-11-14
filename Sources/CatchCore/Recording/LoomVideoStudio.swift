@@ -24,7 +24,10 @@ public final class TeleprompterController: ObservableObject {
     """
 
     @Published public var scriptText: String {
-        didSet { UserDefaults.standard.set(scriptText, forKey: scriptKey) }
+        didSet {
+            UserDefaults.standard.set(scriptText, forKey: scriptKey)
+            if oldValue != scriptText { reset() }
+        }
     }
     @Published public var wordsPerMinute: Double {
         didSet { UserDefaults.standard.set(wordsPerMinute, forKey: wpmKey) }
@@ -47,9 +50,32 @@ public final class TeleprompterController: ObservableObject {
     @Published public var isEditingScript: Bool = false
     @Published public var scrollProgress: Double = 0.0
     @Published public var isVisible: Bool = false
+    @Published private(set) var scrollMode: ScrollMode = .timed
+    @Published private(set) var voiceStatus: VoiceStatus = .idle
+    @Published private(set) var scriptAnchor: Int?
+    @Published private(set) var nextSpokenWord: NSRange?
+    let scriptLayout = TeleprompterTextLayout()
+
+    enum ScrollMode: String, CaseIterable {
+        case timed = "Timed"
+        case voice = "Voice"
+        case followScript = "Follow Script"
+    }
+
+    enum VoiceStatus: Equatable {
+        case idle, starting, waiting, speaking, stageDirection
+        case unavailable(String)
+    }
 
     private var panel: NSPanel?
     private var scrollTimer: Timer?
+    private var voiceMonitor: TeleprompterVoiceMonitor?
+    private var voiceSession: UUID?
+    private var voiceGate = TeleprompterVoiceGate()
+    private var speechTask: Task<Void, Never>?
+    private var stopSpeechSession: (() -> Void)?
+    private var scriptMatcher: TeleprompterScriptMatcher?
+    private var reachedEnd = false
 
     public var windowNumber: Int? {
         panel?.windowNumber
@@ -141,42 +167,224 @@ public final class TeleprompterController: ObservableObject {
 
     public func play() {
         guard !isPlaying else { return }
-        if scrollProgress >= 0.99 {
+        if reachedEnd {
             scrollProgress = 0.0
+            reachedEnd = false
         }
         isPlaying = true
         isEditingScript = false
         scrollTimer?.invalidate()
         let tickInterval = 1.0 / 30.0
         let timer = Timer(timeInterval: tickInterval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            guard self.isPlaying else { return }
-            let totalDuration = max(4.0, self.estimatedDurationSeconds)
-            let delta = tickInterval / totalDuration
-            let next = min(1.0, self.scrollProgress + delta)
-            self.scrollProgress = next
-            if next >= 1.0 {
-                self.pause()
-            }
+            self?.advanceScroll(by: tickInterval)
         }
         RunLoop.main.add(timer, forMode: .common)
         scrollTimer = timer
+        if scrollMode != .timed { startListening() }
+    }
+
+    private var readingProgress: Double {
+        scriptAnchor.map { scriptLayout.progress(for: $0) } ?? scrollProgress
+    }
+
+    private func stageDirection(at progress: Double) -> TeleprompterTextLayout.StageDirection? {
+        scriptLayout.stageDirections.first { $0.approach <= progress && progress < $0.end }
+    }
+
+    func advanceScroll(by seconds: TimeInterval) {
+        guard isPlaying else { return }
+        let position = readingProgress
+        if scrollMode != .timed {
+            // Wait for microphone setup before starting the first timed cue.
+            guard voiceStatus != .starting else { return }
+            if let cue = stageDirection(at: position) {
+                let duration = max(1.5, Double(cue.wordCount) * 60 / max(1, wordsPerMinute))
+                let next = min(cue.end, max(position, cue.start) + (cue.end - cue.start) * seconds / duration)
+                scriptAnchor = nil
+                if nextSpokenWord != nil { nextSpokenWord = nil }
+                scrollProgress = next
+                if next >= cue.end {
+                    if cue.endsScript {
+                        reachedEnd = true
+                        pause()
+                        return
+                    }
+                    voiceGate = TeleprompterVoiceGate()
+                    voiceStatus = .waiting
+                    nextSpokenWord = scriptMatcher?.nextSpokenWord
+                } else if voiceStatus != .stageDirection {
+                    voiceStatus = .stageDirection
+                }
+                return
+            }
+            guard scrollMode == .voice, voiceMonitor != nil else { return }
+            let active = voiceGate.shouldScroll(at: ProcessInfo.processInfo.systemUptime)
+            let status: VoiceStatus = active ? .speaking : .waiting
+            if voiceStatus != status { voiceStatus = status }
+            guard active else { return }
+        }
+
+        let next = min(1, scrollProgress + seconds / max(4, estimatedDurationSeconds))
+        scrollProgress = next
+        if next >= 1 {
+            reachedEnd = true
+            pause()
+        }
     }
 
     public func pause() {
         isPlaying = false
         scrollTimer?.invalidate()
         scrollTimer = nil
+        voiceSession = nil
+        voiceMonitor?.stop()
+        voiceMonitor = nil
+        speechTask?.cancel()
+        speechTask = nil
+        stopSpeechSession?()
+        stopSpeechSession = nil
+        scriptMatcher = nil
+        nextSpokenWord = nil
+        voiceGate = TeleprompterVoiceGate()
+        voiceStatus = .idle
     }
 
     public func reset() {
         pause()
+        reachedEnd = false
+        scriptAnchor = nil
         scrollProgress = 0.0
+    }
+
+    func rewind() {
+        pause()
+        reachedEnd = false
+        scrollProgress = scriptLayout.rewind(progress: scrollProgress, anchor: scriptAnchor)
+        scriptAnchor = nil
+    }
+
+    func selectScrollMode(_ mode: ScrollMode) {
+        guard mode != scrollMode else { return }
+        let wasPlaying = isPlaying
+        pause()
+        if let scriptAnchor {
+            scrollProgress = scriptLayout.progress(for: scriptAnchor)
+            self.scriptAnchor = nil
+        }
+        scrollMode = mode
+        if wasPlaying { play() }
+    }
+
+    private func startListening() {
+        let session = UUID()
+        voiceSession = session
+        voiceStatus = .starting
+
+        let message = "Allow Catch to use the microphone in System Settings."
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            openMicrophone(session: session)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self, self.voiceSession == session else { return }
+                    if granted {
+                        self.openMicrophone(session: session)
+                    } else {
+                        self.failVoiceScroll(message)
+                    }
+                }
+            }
+        default:
+            failVoiceScroll(message)
+        }
+    }
+
+    private func openMicrophone(session: UUID) {
+        if scrollMode == .followScript {
+            if #available(macOS 26, *) {
+                startScriptTracking(session: session)
+            } else {
+                failVoiceScroll("Follow Script needs macOS 26. Choose Voice or Timed to continue.")
+            }
+        } else {
+            openVoiceMonitor(session: session)
+        }
+    }
+
+    @available(macOS 26, *)
+    private func startScriptTracking(session: UUID) {
+        speechTask = Task { @MainActor [weak self] in
+            guard let self, self.voiceSession == session else { return }
+            let speech = TeleprompterSpeechSession()
+            self.stopSpeechSession = { speech.stop() }
+            let offset = self.scriptAnchor ?? self.scriptLayout.character(at: self.scrollProgress)
+            self.scriptMatcher = TeleprompterScriptMatcher(script: self.scriptText, at: offset)
+            self.nextSpokenWord = self.stageDirection(at: self.readingProgress) == nil
+                ? self.scriptMatcher?.nextSpokenWord : nil
+            do {
+                try await speech.start { [weak self] phrase, isFinal in
+                    guard let self, self.voiceSession == session,
+                          self.stageDirection(at: self.readingProgress) == nil,
+                          let position = self.scriptMatcher?.advance(with: phrase, isFinal: isFinal) else { return }
+                    self.scriptAnchor = position
+                    self.nextSpokenWord = self.stageDirection(at: self.readingProgress) == nil
+                        ? self.scriptMatcher?.nextSpokenWord : nil
+                } onFailure: { [weak self] in
+                    guard let self, self.voiceSession == session else { return }
+                    self.failVoiceScroll("Speech tracking stopped. Press Scroll to try again.")
+                }
+                if self.voiceSession == session { self.voiceStatus = .waiting }
+            } catch {
+                guard self.voiceSession == session else { return }
+                self.failVoiceScroll("Couldn't start Follow Script. Check your microphone or choose Voice.")
+            }
+        }
+    }
+
+    private func openVoiceMonitor(session: UUID) {
+        let monitor = TeleprompterVoiceMonitor { [weak self] time in
+            guard let self, self.voiceSession == session else { return }
+            self.voiceGate.noteSpeech(at: time)
+        } onFailure: { [weak self] in
+            guard let self, self.voiceSession == session else { return }
+            self.failVoiceScroll("Microphone changed or stopped. Press Scroll to try again.")
+        }
+
+        do {
+            try monitor.start()
+            voiceMonitor = monitor
+            voiceStatus = .waiting
+        } catch {
+            failVoiceScroll("Couldn't start voice scrolling. Check your microphone input.")
+        }
+    }
+
+    private func failVoiceScroll(_ message: String) {
+        pause()
+        voiceStatus = .unavailable(message)
     }
 }
 
 private struct TeleprompterPanelView: View {
     @ObservedObject var controller: TeleprompterController
+
+    private var statusText: String {
+        switch controller.voiceStatus {
+        case .idle:
+            return "\(controller.wordCount)w · \(Int(controller.wordsPerMinute)) WPM"
+        case .starting:
+            return "Starting mic…"
+        case .waiting:
+            return controller.scrollMode == .followScript ? "Following script" : "Waiting for speech"
+        case .speaking:
+            return "Voice activity"
+        case .stageDirection:
+            return "Stage direction"
+        case .unavailable:
+            return "Voice unavailable"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -219,7 +427,7 @@ private struct TeleprompterPanelView: View {
 
                 Spacer()
 
-                Text("\(controller.wordCount)w · \(Int(controller.wordsPerMinute)) WPM")
+                Text(statusText)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(RaycastTheme.textTertiary)
 
@@ -231,6 +439,12 @@ private struct TeleprompterPanelView: View {
                         .foregroundStyle(RaycastTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
+            }
+
+            if case let .unavailable(message) = controller.voiceStatus {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
             }
 
             // Script scrolling stage or editor
@@ -249,21 +463,15 @@ private struct TeleprompterPanelView: View {
                     )
             } else {
                 ZStack {
-                    GeometryReader { geo in
-                        let travel = max(0, estimatedContentHeight(width: geo.size.width - 28) - geo.size.height + 64)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Spacer().frame(height: 22)
-                            Text(controller.scriptText)
-                                .font(.system(size: controller.fontSize, weight: .medium, design: .rounded))
-                                .lineSpacing(6)
-                                .foregroundStyle(Color.white.opacity(0.95))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Spacer().frame(height: 42)
-                        }
-                        .padding(.horizontal, 14)
-                        .offset(y: -CGFloat(controller.scrollProgress) * travel)
-                        .animation(.linear(duration: 0.05), value: controller.scrollProgress)
-                    }
+                    TeleprompterScriptView(
+                        layout: controller.scriptLayout,
+                        script: controller.scriptText,
+                        fontSize: controller.fontSize,
+                        progress: controller.scrollProgress,
+                        anchor: controller.scriptAnchor,
+                        nextSpokenWord: controller.nextSpokenWord
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
 
                     // Eye-line reading focal band
@@ -343,12 +551,45 @@ private struct TeleprompterPanelView: View {
                 .buttonStyle(.plain)
                 .help("Reset to Top")
 
+                Button(action: controller.rewind) {
+                    Image(systemName: "chevron.up.2")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.textPrimary)
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
+                .disabled(controller.isEditingScript || (controller.scrollProgress == 0 && controller.scriptAnchor == nil))
+                .accessibilityLabel("Back Two Lines")
+                .help("Back two lines and pause")
+
+                Menu {
+                    ForEach(TeleprompterController.ScrollMode.allCases, id: \.self) { mode in
+                        Button {
+                            controller.selectScrollMode(mode)
+                        } label: {
+                            if controller.scrollMode == mode {
+                                Label(mode.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(mode.rawValue)
+                            }
+                        }
+                    }
+                } label: {
+                    Text(controller.scrollMode.rawValue)
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .fixedSize()
+                .accessibilityLabel("Scroll mode")
+                .accessibilityValue(controller.scrollMode.rawValue)
+
                 HStack(spacing: 4) {
-                    Image(systemName: "gauge.with.needle")
-                        .font(.system(size: 10))
-                        .foregroundStyle(RaycastTheme.textTertiary)
                     Slider(value: $controller.wordsPerMinute, in: 60...260, step: 10)
-                        .frame(width: 82)
+                        .frame(width: 70)
+                        .accessibilityLabel("Words per minute")
+                        .help(controller.scrollMode == .followScript
+                              ? "Stage direction speed"
+                              : "\(Int(controller.wordsPerMinute)) words per minute")
                 }
 
                 HStack(spacing: 4) {
@@ -405,13 +646,6 @@ private struct TeleprompterPanelView: View {
         .padding(12)
         .raycastLiquidGlass(cornerRadius: 16, tintAlpha: 0.86)
         .preferredColorScheme(.dark)
-    }
-
-    private func estimatedContentHeight(width: CGFloat) -> CGFloat {
-        let lineHeight = controller.fontSize * 1.45
-        let charsPerLine = max(18.0, width / (controller.fontSize * 0.56))
-        let totalLines = max(3.0, ceil(Double(controller.scriptText.count) / charsPerLine))
-        return CGFloat(totalLines) * lineHeight
     }
 }
 

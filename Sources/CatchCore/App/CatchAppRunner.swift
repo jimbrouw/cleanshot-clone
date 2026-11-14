@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Carbon
+import Combine
 
 public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     public static let shared = CatchAppRunner()
@@ -9,6 +10,7 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     private var hotKeyRefs: [EventHotKeyRef] = []
     private var hotKeyHandlers: [UInt32: () -> Void] = [:]
     private var isHotKeyHandlerInstalled = false
+    private var clipboardMonitoringPreference: AnyCancellable?
 
     public static func run() {
         let app = NSApplication.shared
@@ -25,10 +27,17 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
             self?.reregisterHotkeys()
         }
         _ = HistoryStore.shared.pruneExpiredItems(retention: SettingsStore.shared.keepHistoryDuration)
-        if SettingsStore.shared.clipboardHistoryEnabled {
-            ClipboardHistoryStore.shared.pruneExpired(days: SettingsStore.shared.clipboardRetentionDays)
-            ClipboardHistoryStore.shared.startMonitoring()
-        }
+        clipboardMonitoringPreference = SettingsStore.shared.$clipboardHistoryEnabled
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { enabled in
+                if enabled {
+                    ClipboardHistoryStore.shared.pruneExpired(days: SettingsStore.shared.clipboardRetentionDays)
+                    ClipboardHistoryStore.shared.startMonitoring()
+                } else {
+                    ClipboardHistoryStore.shared.stopMonitoring()
+                }
+            }
 
         SystemPermissionsManager.shared.refreshStatus()
         if !SettingsStore.shared.hasCompletedOnboarding

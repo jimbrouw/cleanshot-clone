@@ -313,7 +313,9 @@ public struct SettingsWindowView: View {
 
     private var cloudTab: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Cloud").font(.title2.bold())
+            Text("Local Sharing").font(.title2.bold())
+            Text("Links open on this Mac and expire when Catch quits.")
+                .foregroundStyle(.secondary)
             TextField("Account Name", text: $settings.accountName)
                 .textFieldStyle(.roundedBorder)
             Picker("Screenshot quality", selection: $settings.screenshotUploadQuality) {
@@ -321,7 +323,6 @@ public struct SettingsWindowView: View {
                 Text("Original").tag(CloudUploadQuality.original)
             }
             Toggle("Ask for name & show advanced options", isOn: $settings.askForNameAndAdvancedOptionsOnUpload)
-            Toggle("Copy link when upload starts", isOn: $settings.copyLinkWhenUploadStarts)
             Toggle("Show recently uploaded media in Menu Bar", isOn: $settings.showRecentlyUploadedInMenuBar)
         }
     }
@@ -373,6 +374,9 @@ public struct SettingsWindowView: View {
 
             settingsSectionCard(title: "Automation", icon: "link") {
                 Toggle("Allow URL scheme API (catch://)", isOn: $settings.allowURLSchemeAPI)
+                Text("Allows websites and other apps to ask Catch to run commands.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -469,7 +473,7 @@ public struct SettingsWindowView: View {
         case .showQuickAccessOverlay: return "Show Quick Access Overlay"
         case .copyToClipboard: return "Copy file to clipboard"
         case .save: return "Save"
-        case .uploadToCloud: return "Upload to Cloud & copy link"
+        case .uploadToCloud: return "Create local preview link"
         case .openAnnotate: return "Open Annotate tool"
         case .pinToScreen: return "Pin to the screen"
         }

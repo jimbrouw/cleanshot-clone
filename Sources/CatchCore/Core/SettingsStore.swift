@@ -306,9 +306,9 @@ public final class SettingsStore: ObservableObject {
         self.pinnedRoundedCorners = defaults.object(forKey: keyPrefix + "pinnedRoundedCorners") as? Bool ?? true
         self.pinnedShadow = defaults.object(forKey: keyPrefix + "pinnedShadow") as? Bool ?? true
         self.pinnedBorder = defaults.object(forKey: keyPrefix + "pinnedBorder") as? Bool ?? false
-        self.allowURLSchemeAPI = defaults.object(forKey: keyPrefix + "allowURLSchemeAPI") as? Bool ?? true
+        self.allowURLSchemeAPI = defaults.object(forKey: keyPrefix + "allowURLSchemeAPI") as? Bool ?? false
         self.hasCompletedOnboarding = defaults.object(forKey: keyPrefix + "hasCompletedOnboarding") as? Bool ?? false
-        self.clipboardHistoryEnabled = defaults.object(forKey: keyPrefix + "clipboardHistoryEnabled") as? Bool ?? true
+        self.clipboardHistoryEnabled = defaults.object(forKey: keyPrefix + "clipboardHistoryEnabled") as? Bool ?? false
         self.clipboardOCREnabled = defaults.object(forKey: keyPrefix + "clipboardOCREnabled") as? Bool ?? true
         self.clipboardRetentionDays = defaults.object(forKey: keyPrefix + "clipboardRetentionDays") as? Int ?? 7
     }

@@ -47,7 +47,8 @@ public enum URLSchemeRouter {
             if let xStr = params["x"], let yStr = params["y"],
                let wStr = params["width"], let hStr = params["height"],
                let x = Double(xStr), let y = Double(yStr),
-               let w = Double(wStr), let h = Double(hStr) {
+               let w = Double(wStr), let h = Double(hStr),
+               x.isFinite, y.isFinite, w.isFinite, h.isFinite, w > 0, h > 0 {
                 return CGRect(x: x, y: y, width: w, height: h)
             }
             return nil

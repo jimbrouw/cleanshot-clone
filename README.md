@@ -15,9 +15,10 @@ A native macOS screen capture, annotation, background framing, scrolling capture
 - **On-Device Text Recognition (OCR) & QR Codes**: Apple `Vision` (`VNRecognizeTextRequest` + `VNDetectBarcodesRequest`) with line-break and link detection.
 - **Pinned Screenshots**: Always-on-top floating reference windows with opacity slider, `1px` arrow-key nudging, and click-through **Lock Mode**.
 - **Capture History**: SQLite-backed history browser (`All | Screenshots | Videos | GIFs`), search, retention pruning, and one-click restore.
-- **Cloud Share & Comments Server**: One-click upload with clipboard link copy and local HTTP share viewer supporting spatial comments.
+- **Local Sharing**: Copies a preview link that works from this Mac until Catch quits. The viewer listens on loopback and serves read-only previews.
 - **10-Tab Settings & Custom Filename Builder**: All 13 tokens (`%y`, `%m`, `%n`, `%d`, `%w`, `%t`, `%a`, `%H`, `%M`, `%S`, `%p`, `%r`, `%i`), UTC toggle, and illegal-character sanitization.
-- **URL Scheme API (`catch://`)**: All 19 documented commands (`all-in-one`, `capture-area`, `capture-previous-area`, `capture-fullscreen`, `capture-window`, `self-timer`, `scrolling-capture`, `pin`, `record-screen`, `capture-text`, `open-annotate`, `open-from-clipboard`, `toggle-desktop-icons`, `hide-desktop-icons`, `show-desktop-icons`, `add-quick-access-overlay`, `open-history`, `restore-recently-closed`, `open-settings`).
+- **URL Scheme API (`catch://`)**: Off by default. Enable it in Advanced settings only if you use URL automation. Websites and other apps can invoke commands while this setting is on.
+- **Clipboard monitoring**: Off by default. Enable it in Clipboard settings to start collecting clipboard history.
 
 ## Build, Test & Package
 
