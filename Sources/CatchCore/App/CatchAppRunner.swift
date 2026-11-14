@@ -91,7 +91,12 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     public func setupMenuBar() {
         guard SettingsStore.shared.showMenuBarIcon else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Catch")
+        let mark = Bundle.module.url(forResource: "CatchMenuBar", withExtension: "png")
+            .flatMap { NSImage(contentsOf: $0) }
+        mark?.size = NSSize(width: 18, height: 18)
+        mark?.isTemplate = true
+        mark?.accessibilityDescription = "Catch"
+        item.button?.image = mark ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Catch")
         item.menu = buildMenu()
         self.statusItem = item
     }

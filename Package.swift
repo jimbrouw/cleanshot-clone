@@ -20,6 +20,7 @@ let package = Package(
         .target(
             name: "CatchCore",
             path: "Sources/CatchCore",
+            resources: [.process("Resources")],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI"),

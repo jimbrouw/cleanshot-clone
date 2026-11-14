@@ -14,6 +14,8 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/Catch"
 cp "$ROOT_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "$ROOT_DIR/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+cp -R "$(dirname "$BIN_PATH")/Catch_CatchCore.bundle" "$APP_BUNDLE/Contents/Resources/"
 
 if command -v codesign >/dev/null 2>&1; then
     codesign --force --deep --sign - "$APP_BUNDLE" || true
