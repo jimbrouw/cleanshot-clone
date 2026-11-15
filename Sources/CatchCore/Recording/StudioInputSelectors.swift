@@ -48,6 +48,7 @@ struct StudioInputSelectors: View {
             if compact {
                 HStack(spacing: 12) {
                     cameraPicker
+                    cameraFramePicker
                     microphonePicker
                     if let error = camera.cameraError, camera.isVisible {
                         Image(systemName: "exclamationmark.triangle")
@@ -60,6 +61,7 @@ struct StudioInputSelectors: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     cameraPicker
+                    cameraFramePicker
                     microphonePicker
                     if let error = camera.cameraError, camera.isVisible {
                         Text(error).font(.caption).foregroundStyle(.secondary)
@@ -92,6 +94,16 @@ struct StudioInputSelectors: View {
                 settings.recordingMicrophoneID = id
             }
         ), available: devices.microphones)
+    }
+
+    private var cameraFramePicker: some View {
+        Picker("Camera Frame", selection: $camera.shape) {
+            ForEach(CameraBubbleShape.allCases, id: \.self) { shape in
+                Text(shape.label).tag(shape)
+            }
+        }
+        .pickerStyle(.menu)
+        .help("Choose the shape of the floating camera window")
     }
 
     private func inputPicker(_ title: String, selection: Binding<String?>, available: [AVCaptureDevice]) -> some View {
