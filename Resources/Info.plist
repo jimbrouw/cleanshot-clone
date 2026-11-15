@@ -32,6 +32,8 @@
     <string>Catch needs Camera access for the floating picture-in-picture webcam bubble during Loom-style screen recordings.</string>
     <key>NSCameraUseContinuityCameraDeviceType</key>
     <true/>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Catch transcribes recordings on this Mac to create editable captions.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Catch uses the microphone for voiceover, voice-controlled scrolling, and on-device script matching.</string>
     <key>CFBundleURLTypes</key>
