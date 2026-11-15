@@ -35,6 +35,7 @@ public final class SettingsWindowController {
 public struct SettingsWindowView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var clipboardStore = ClipboardHistoryStore.shared
+    @ObservedObject private var drive = GoogleDrive.shared
     @State private var selectedTab: SettingsTab
     @State private var shortcutSearch = ""
     @State private var showFileNameBuilder = false
@@ -262,6 +263,14 @@ public struct SettingsWindowView: View {
             Text("Catch Studio & Screen Recording").font(.title2.bold())
             settingsSectionCard(title: "Camera & Microphone", icon: "video") {
                 StudioInputSelectors(studio: ScreenRecordingStudio.shared)
+            }
+            settingsSectionCard(title: "Google Drive", icon: "externaldrive") {
+                Text(drive.account.map { "Connected: \($0)" } ?? "Not connected")
+                HStack {
+                    Button("Connect Google Drive") { drive.connect() }.disabled(drive.connecting || drive.account != nil)
+                    Button("Disconnect") { drive.disconnect() }.disabled(drive.connecting || drive.transferring || drive.account == nil)
+                }
+                if let message = drive.message { Text(message).font(.caption).textSelection(.enabled) }
             }
             StudioBridgeSettingsView()
 
