@@ -654,6 +654,35 @@ private struct TeleprompterPanelView: View {
 public enum CameraBubbleShape: String, Codable, CaseIterable, Sendable {
     case circle
     case squircle
+    case portrait
+
+    var label: String {
+        switch self {
+        case .circle: return "Circle"
+        case .squircle: return "Rounded Square"
+        case .portrait: return "Portrait (9:16)"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .circle: return "circle"
+        case .squircle: return "square"
+        case .portrait: return "rectangle.portrait"
+        }
+    }
+
+    func panelSize(width: CGFloat) -> CGSize {
+        CGSize(width: width, height: self == .portrait ? width * 16 / 9 : width)
+    }
+
+    func cornerRadius(width: CGFloat) -> CGFloat {
+        switch self {
+        case .circle: return width / 2
+        case .squircle: return 28
+        case .portrait: return 14
+        }
+    }
 }
 
 public enum CameraBubbleSize: String, Codable, CaseIterable, Sendable {
@@ -679,11 +708,14 @@ public enum CameraBubbleSize: String, Codable, CaseIterable, Sendable {
 }
 
 public final class CameraBubbleController: ObservableObject {
-    public static let shared = CameraBubbleController()
+    public static let shared = CameraBubbleController(settings: .shared)
 
     @Published public var isVisible: Bool = false
-    @Published public var shape: CameraBubbleShape = .circle {
-        didSet { updatePanelSize() }
+    @Published public var shape: CameraBubbleShape {
+        didSet {
+            settings?.recordingCameraShape = shape
+            updatePanelSize()
+        }
     }
     @Published public var bubbleSize: CameraBubbleSize = .medium {
         didSet { updatePanelSize() }
@@ -693,7 +725,9 @@ public final class CameraBubbleController: ObservableObject {
     @Published public private(set) var hasLiveCameraFeed: Bool = false
     @Published private(set) var cameraError: String?
 
+    private let settings: SettingsStore?
     private var panel: NSPanel?
+    var panelSize: CGSize { shape.panelSize(width: bubbleSize.dimension) }
     // The main queue owns the preview reference and request token. The session
     // queue owns starting and stopping the capture session.
     private var previewSession: AVCaptureSession?
@@ -703,7 +737,13 @@ public final class CameraBubbleController: ObservableObject {
     private var disconnectObserver: NSObjectProtocol?
     private let sessionQueue = DispatchQueue(label: "com.catchapp.camerabubble")
 
-    public init() {
+    public convenience init() {
+        self.init(settings: nil)
+    }
+
+    private init(settings: SettingsStore?) {
+        self.settings = settings
+        self.shape = settings?.recordingCameraShape ?? .circle
         disconnectObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main
         ) { [weak self] notification in
@@ -730,13 +770,13 @@ public final class CameraBubbleController: ObservableObject {
             }
 
             let targetScreen = screen ?? CaptureEngine.shared.resolveScreen(displayIndex: nil)
-            let dim = self.bubbleSize.dimension
+            let size = self.panelSize
             let origin = CGPoint(
                 x: targetScreen.visibleFrame.minX + 24,
                 y: targetScreen.visibleFrame.minY + 24
             )
             let panel = NSPanel(
-                contentRect: CGRect(origin: origin, size: CGSize(width: dim, height: dim)),
+                contentRect: CGRect(origin: origin, size: size),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
@@ -752,7 +792,7 @@ public final class CameraBubbleController: ObservableObject {
 
             let hosting = NSHostingView(rootView: CameraBubbleView(controller: self))
             hosting.sizingOptions = []
-            hosting.frame = CGRect(origin: .zero, size: CGSize(width: dim, height: dim))
+            hosting.frame = CGRect(origin: .zero, size: size)
             panel.contentView = hosting
             panel.invalidateShadow()
             panel.orderFrontRegardless()
@@ -788,16 +828,28 @@ public final class CameraBubbleController: ObservableObject {
     }
 
     public func toggleShape() {
-        shape = (shape == .circle) ? .squircle : .circle
+        shape = nextShape
+    }
+
+    fileprivate var nextShape: CameraBubbleShape {
+        switch shape {
+        case .circle: return .squircle
+        case .squircle: return .portrait
+        case .portrait: return .circle
+        }
     }
 
     private func updatePanelSize() {
         guard let panel else { return }
-        let dim = bubbleSize.dimension
-        let old = panel.frame
-        let updated = CGRect(x: old.origin.x, y: old.origin.y, width: dim, height: dim)
+        let size = panelSize
+        var origin = panel.frame.origin
+        if let visibleFrame = panel.screen?.visibleFrame {
+            origin.x = max(visibleFrame.minX, min(origin.x, visibleFrame.maxX - size.width))
+            origin.y = max(visibleFrame.minY, min(origin.y, visibleFrame.maxY - size.height))
+        }
+        let updated = CGRect(origin: origin, size: size)
         panel.setFrame(updated, display: true, animate: true)
-        panel.contentView?.frame = CGRect(origin: .zero, size: CGSize(width: dim, height: dim))
+        panel.contentView?.frame = CGRect(origin: .zero, size: size)
         panel.invalidateShadow()
     }
 
@@ -902,8 +954,8 @@ private struct CameraBubbleView: View {
     @State private var isHovered = false
 
     var body: some View {
-        let dim = controller.bubbleSize.dimension
-        let radius: CGFloat = controller.shape == .circle ? dim / 2 : 28
+        let size = controller.panelSize
+        let radius = controller.shape.cornerRadius(width: size.width)
 
         ZStack {
             if controller.hasLiveCameraFeed, let session = controller.activeSession {
@@ -917,7 +969,7 @@ private struct CameraBubbleView: View {
                     )
                     VStack(spacing: 6) {
                         Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: dim * 0.34))
+                            .font(.system(size: size.width * 0.34))
                             .foregroundStyle(RaycastTheme.textPrimary.opacity(0.85))
                         Text(controller.cameraError ?? (controller.cameraAuthorized ? "Starting camera…" : "Camera Ready"))
                             .font(.system(size: 10, weight: .semibold))
@@ -928,7 +980,7 @@ private struct CameraBubbleView: View {
                 }
             }
         }
-        .frame(width: dim, height: dim)
+        .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -952,13 +1004,15 @@ private struct CameraBubbleView: View {
                     Button {
                         controller.toggleShape()
                     } label: {
-                        Image(systemName: controller.shape == .circle ? "square.dashed" : "circle")
+                        Image(systemName: controller.nextShape.symbol)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(4)
                             .background(Circle().fill(Color.white.opacity(0.18)))
                     }
                     .buttonStyle(.plain)
+                    .help("Use \(controller.nextShape.label) camera frame")
+                    .accessibilityLabel("Use \(controller.nextShape.label) camera frame")
 
                     Button {
                         controller.isMirrored.toggle()
