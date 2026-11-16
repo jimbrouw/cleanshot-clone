@@ -57,3 +57,7 @@ Choose **Camera** and **Microphone** directly in Catch Studio or in **Settings �
 During an active recording, hold **Option-Shift-Command-D** to draw, release to return pointer input, and use **Clear Ink** to clear the layer. Marks fade after release. The review window exports a new file; passthrough trim points may move to video keyframes, so check the copy.
 
 These features are experimental: microphone recording, pause timing, prompter exclusion, hold-to-draw, trim, and the end-to-end bridge require live recording and playback verification. The default `catch://` setting is independent of the bridge.
+
+## Transcript handoff
+
+In a finished take’s Review window, expand **Search and correct transcript** to find spoken text and play a matching caption. Corrections stay editable. **Copy Transcript** copies the full recording’s timestamped transcript, including when a search filter is active. **Export Captions** offers SubRip (`.srt`) and WebVTT (`.vtt`). Review an edited copy to export captions on its trimmed timeline.

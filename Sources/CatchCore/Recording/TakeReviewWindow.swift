@@ -42,6 +42,7 @@ private final class TakeReviewModel: ObservableObject {
     @Published var captions: [CaptionCue] = []
     @Published var captionStatus = "Preparing captions…"
     @Published var captionsEnabled = true
+    @Published var transcriptQuery = ""
     @Published var playhead: Double = 0
     @Published var editedCopy: URL?
     @Published var shareEdited = false
@@ -76,14 +77,22 @@ private final class TakeReviewModel: ObservableObject {
         catch { captionStatus = "Could not save caption edits: \(error.localizedDescription)" }
     }
 
-    func exportCaptions() {
+    func copyTranscript() {
+        NSPasteboard.general.clearContents()
+        captionStatus = NSPasteboard.general.setString(TakeCaptions.transcript(captions), forType: .string)
+            ? "Full timestamped transcript copied."
+            : "Could not copy the transcript. Try again."
+    }
+
+    func exportCaptions(webVTT: Bool = false) {
         guard !captions.isEmpty else { return }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "srt") ?? .plainText]
-        panel.nameFieldStringValue = source.deletingPathExtension().lastPathComponent + ".srt"
+        let fileExtension = webVTT ? "vtt" : "srt"
+        panel.allowedContentTypes = [UTType(filenameExtension: fileExtension) ?? .plainText]
+        panel.nameFieldStringValue = source.deletingPathExtension().lastPathComponent + "." + fileExtension
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard url.standardizedFileURL != source.standardizedFileURL else { captionStatus = "Choose a separate SRT file."; return }
-        do { try TakeCaptions.srt(captions).write(to: url, atomically: true, encoding: .utf8); captionStatus = "Exported captions for the full recording: \(url.lastPathComponent)" }
+        guard url.standardizedFileURL != source.standardizedFileURL else { captionStatus = "Choose a separate caption file."; return }
+        do { try (webVTT ? TakeCaptions.webVTT(captions) : TakeCaptions.srt(captions)).write(to: url, atomically: true, encoding: .utf8); captionStatus = "Exported captions for the full recording: \(url.lastPathComponent)" }
         catch { captionStatus = "Caption export failed: \(error.localizedDescription)" }
     }
 
@@ -217,18 +226,29 @@ private struct TakeReviewView: View {
                 Toggle("CC", isOn: $model.captionsEnabled).toggleStyle(.button)
                 Text(model.captionStatus).font(.caption).textSelection(.enabled)
                 Spacer()
-                Button("Export Captions") { model.exportCaptions() }.disabled(model.captions.isEmpty)
+                Menu("Export Captions") {
+                    Button("SubRip (.srt)") { model.exportCaptions() }
+                    Button("WebVTT (.vtt)") { model.exportCaptions(webVTT: true) }
+                }.disabled(model.captions.isEmpty)
+                Button("Copy Transcript") { model.copyTranscript() }.disabled(model.captions.isEmpty)
                 Button("Retry") { model.transcribe() }.disabled(!model.captions.isEmpty)
             }
             if !model.captions.isEmpty {
-                DisclosureGroup("Correct captions") {
+                DisclosureGroup("Search and correct transcript") {
+                    TextField("Search transcript", text: $model.transcriptQuery)
+                        .textFieldStyle(.roundedBorder)
+                    if !model.transcriptQuery.isEmpty && !model.captions.contains(where: { $0.text.localizedStandardContains(model.transcriptQuery) }) {
+                        Text("No matching captions.").font(.caption).foregroundStyle(.secondary)
+                    }
                     ScrollView {
                         VStack {
                             ForEach($model.captions) { $cue in
-                                HStack {
-                                    Text("\(cue.start, specifier: "%.1f")s").font(.caption.monospacedDigit()).frame(width: 55)
-                                    TextField("Caption", text: $cue.text).onChange(of: cue.text) { _, _ in model.saveCaptions() }
-                                    Button("Play") { model.player.seek(to: CMTime(seconds: cue.start, preferredTimescale: 600)); model.player.play() }
+                                if model.transcriptQuery.isEmpty || cue.text.localizedStandardContains(model.transcriptQuery) {
+                                    HStack {
+                                        Text("\(cue.start, specifier: "%.1f")s").font(.caption.monospacedDigit()).frame(width: 55)
+                                        TextField("Caption", text: $cue.text).onChange(of: cue.text) { _, _ in model.saveCaptions() }
+                                        Button("Play") { model.player.seek(to: CMTime(seconds: cue.start, preferredTimescale: 600)); model.player.play() }
+                                    }
                                 }
                             }
                         }
