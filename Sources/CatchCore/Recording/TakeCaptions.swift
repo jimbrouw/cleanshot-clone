@@ -38,6 +38,30 @@ enum TakeCaptions {
         }.joined(separator: "\n")
     }
 
+    /// A portable transcript for notes, issue reports, and editing handoffs.
+    static func transcript(_ cues: [CaptionCue]) -> String {
+        cues.map { cue in
+            let seconds = cue.start.isFinite && cue.start < Double(Int.max) ? Int(max(0, cue.start)) : 0
+            let stamp = String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+            return "[\(stamp)] \(cue.text.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }.joined(separator: "\n")
+    }
+
+    static func webVTT(_ cues: [CaptionCue]) -> String {
+        let escaped = cues.map { cue -> CaptionCue in
+            var copy = cue
+            copy.text = copy.text.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+                .components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
+            return copy
+        }
+        let body = srt(escaped).components(separatedBy: "\n").map { line in
+            line.contains(" --> ") ? line.replacingOccurrences(of: ",", with: ".") : line
+        }.joined(separator: "\n")
+        return "WEBVTT\n\n" + body
+    }
+
     static func recognize(url: URL, completion: @escaping (Result<[CaptionCue], Error>) -> Void) {
         SFSpeechRecognizer.requestAuthorization { status in
             guard status == .authorized else { completion(.failure(CaptionError.permission)); return }
