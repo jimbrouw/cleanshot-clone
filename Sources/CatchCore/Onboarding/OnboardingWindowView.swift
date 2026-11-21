@@ -343,8 +343,12 @@ public struct OnboardingWizardView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(granted ? .green : Color.accentColor)
                 .disabled(granted)
-            Button("Open Settings", action: openSettings)
-                .buttonStyle(.bordered)
+            if !granted {
+                Button("Open Settings", action: openSettings)
+                    .buttonStyle(.bordered)
+                Button("Check Again") { permissions.refreshStatus() }
+                    .buttonStyle(.borderless)
+            }
         }
     }
     .padding(15)

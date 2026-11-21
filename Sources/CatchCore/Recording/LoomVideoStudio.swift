@@ -1121,6 +1121,8 @@ public enum RecordingAreaMode: String, Codable, CaseIterable, Sendable {
 
 public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked Sendable {
     public static let shared = ScreenRecordingStudio()
+    fileprivate static let screenRecordingPermissionError =
+        "Allow this copy of Catch in Screen & System Audio Recording, then quit and reopen it before trying again."
 
     public enum StudioState: Equatable, Sendable {
         case idle
@@ -1183,7 +1185,11 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: displayIndex)
 
             if showPresenterOverlays && self.showCameraBubble {
-                CameraBubbleController.shared.show(on: screen)
+                if AVCaptureDevice.authorizationStatus(for: .video) == .authorized {
+                    CameraBubbleController.shared.show(on: screen)
+                } else {
+                    self.showCameraBubble = false
+                }
             }
             if showPresenterOverlays && self.showTeleprompter {
                 TeleprompterController.shared.show(on: screen)
@@ -1255,6 +1261,10 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         StudioMicrophoneMeter.shared.stop()
         recordingError = nil
         lastRecordedVideoURL = nil
+        guard headlessSynthetic || CGPreflightScreenCaptureAccess() else {
+            recordingError = Self.screenRecordingPermissionError
+            return
+        }
         state = .preparing
         elapsedSeconds = 0
         accumulatedElapsed = 0
@@ -1306,7 +1316,7 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 guard started else {
                     self.writerQueue.sync { self.assetWriter?.cancelWriting(); self.assetWriter = nil }
                     try? FileManager.default.removeItem(at: outputURL)
-                    if self.recordingError == nil { self.recordingError = "Screen recording could not start. Check Screen Recording permission and try again." }
+                    if self.recordingError == nil { self.recordingError = "Screen recording could not start. Reopen Studio and try again." }
                     self.state = .idle
                     return
                 }
@@ -1397,14 +1407,14 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                 try? await capturedStream.stopCapture()
             }
 
-            let succeeded: Bool
-            if let outputURL {
-                succeeded = await finalizeWriter(outputURL: outputURL, fallbackSize: size, fps: fps)
+            let failure: String?
+            if outputURL != nil {
+                failure = await finalizeWriter(fallbackSize: size, fps: fps)
             } else {
-                succeeded = false
+                failure = "Catch could not find the output file for this take."
             }
 
-            let finalURL = succeeded ? outputURL : nil
+            let finalURL = failure == nil ? outputURL : nil
             var historyItem: CaptureHistoryItem?
             if let finalURL,
                let videoData = try? Data(contentsOf: finalURL),
@@ -1431,7 +1441,7 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     catch { self.recordingError = "The video was saved, but its edit handoff could not be written: \(error.localizedDescription)" }
                 }
                 self.activeOutputURL = nil
-                if !succeeded { self.recordingError = "Recording did not produce a valid video. No take was added to History." }
+                if let failure { self.recordingError = "\(failure) No take was added to History." }
                 self.state = .idle
                 completion?(finalURL, createdItem)
             }
@@ -1451,10 +1461,6 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
     }
 
     private func startScreenCaptureKitRecording(to outputURL: URL, microphoneID: String?) async -> Bool {
-        guard CGPreflightScreenCaptureAccess() else {
-            await MainActor.run { self.recordingError = "Screen Recording permission is required. Allow Catch in System Settings and restart it." }
-            return false
-        }
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: nil)
@@ -1529,6 +1535,9 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             self.streamOutput = handler
             self.scStream = stream
             return true
+        } catch let error as SCStreamError where error.code == .userDeclined {
+            await MainActor.run { self.recordingError = Self.screenRecordingPermissionError }
+            return false
         } catch {
             await MainActor.run { self.recordingError = "Screen capture could not start: \(error.localizedDescription)" }
             return false
@@ -1630,12 +1639,16 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
             guard let self,
                   let writer = self.assetWriter,
                   self.writerAcceptingSamples,
+                  self.streamFailure == nil,
                   let sampleBuffer = Self.removingPause(self.removedPauseDuration, from: sampleBuffer) else { return }
 
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             if !self.sessionStarted {
                 guard type == .screen else { return }
-                writer.startWriting()
+                guard writer.startWriting() else {
+                    self.streamFailure = Self.writerFailure(writer, fallback: "The video encoder could not start.")
+                    return
+                }
                 writer.startSession(atSourceTime: pts)
                 self.sessionStarted = true
             }
@@ -1646,13 +1659,13 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     if vInput.append(sampleBuffer) {
                         self.frameCounter += 1
                     } else {
-                        self.streamFailure = writer.error?.localizedDescription ?? "Video writer rejected a frame."
+                        self.streamFailure = Self.writerFailure(writer, fallback: "Video writer rejected a frame.")
                     }
                 }
             case .audio:
                 if let aInput = self.audioInput, aInput.isReadyForMoreMediaData {
                     if !aInput.append(sampleBuffer) {
-                        self.streamFailure = writer.error?.localizedDescription ?? "Audio writer rejected a sample."
+                        self.streamFailure = Self.writerFailure(writer, fallback: "System audio writer rejected a sample.")
                     }
                 }
             default:
@@ -1661,7 +1674,7 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     if input.append(sampleBuffer) {
                         self.microphoneSamples += 1
                     } else {
-                        self.streamFailure = writer.error?.localizedDescription ?? "Microphone writer rejected a sample."
+                        self.streamFailure = Self.writerFailure(writer, fallback: "Microphone writer rejected a sample.")
                     }
                 }
             }
@@ -1699,11 +1712,17 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
         return adjusted
     }
 
-    private func finalizeWriter(outputURL: URL, fallbackSize: CGSize, fps: Int) async -> Bool {
+    private static func writerFailure(_ writer: AVAssetWriter, fallback: String) -> String {
+        guard let error = writer.error as NSError? else { return fallback }
+        let cause = (error.userInfo[NSUnderlyingErrorKey] as? NSError).map { " — \($0.domain) \($0.code)" } ?? ""
+        return "\(fallback) \(error.localizedDescription) (\(error.domain) \(error.code)\(cause))"
+    }
+
+    private func finalizeWriter(fallbackSize: CGSize, fps: Int) async -> String? {
         await withCheckedContinuation { continuation in
             writerQueue.async { [weak self] in
                 guard let self, let writer = self.assetWriter else {
-                    continuation.resume(returning: false)
+                    continuation.resume(returning: "Catch could not open the video writer for this take.")
                     return
                 }
 
@@ -1729,11 +1748,24 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     }
                 }
 
-                guard self.sessionStarted, self.streamFailure == nil,
-                      self.syntheticTake || (self.frameCounter > 0 && (self.microphoneInput == nil || self.microphoneSamples > 0)) else {
-                    writer.cancelWriting()
+                let failure: String?
+                if let streamFailure = self.streamFailure {
+                    failure = streamFailure
+                } else if writer.status == .failed {
+                    failure = Self.writerFailure(writer, fallback: "Catch could not write the MP4.")
+                } else if !self.sessionStarted || (!self.syntheticTake && self.frameCounter == 0) {
+                    failure = "Catch received no usable screen frames."
+                } else if self.microphoneInput != nil && self.microphoneSamples == 0 {
+                    failure = "Catch received no audio from the selected microphone. Check the input in Studio or turn off the microphone for a silent take."
+                } else if writer.status != .writing {
+                    failure = Self.writerFailure(writer, fallback: "The MP4 writer stopped before the take could be saved.")
+                } else {
+                    failure = nil
+                }
+                if let failure {
+                    if writer.status == .writing { writer.cancelWriting() }
                     self.assetWriter = nil
-                    continuation.resume(returning: false)
+                    continuation.resume(returning: failure)
                     return
                 }
                 self.videoInput?.markAsFinished()
@@ -1747,7 +1779,7 @@ public final class ScreenRecordingStudio: NSObject, ObservableObject, @unchecked
                     self.microphoneInput = nil
                     self.pixelAdaptor = nil
                     self.sessionStarted = false
-                    continuation.resume(returning: writer.status == .completed)
+                    continuation.resume(returning: writer.status == .completed ? nil : Self.writerFailure(writer, fallback: "Catch could not finish the MP4."))
                 }
             }
         }
@@ -1827,10 +1859,15 @@ private struct LoomStudioBarView: View {
         .alert("Recording error", isPresented: Binding(
             get: { studio.recordingError != nil },
             set: { if !$0 { studio.recordingError = nil } }
-        )) {
+        ), presenting: studio.recordingError) { error in
+            if error == ScreenRecordingStudio.screenRecordingPermissionError {
+                Button("Open System Settings") {
+                    SystemPermissionsManager.shared.openScreenRecordingSettings()
+                }
+            }
             Button("OK", role: .cancel) { studio.recordingError = nil }
-        } message: {
-            Text(studio.recordingError ?? "")
+        } message: { error in
+            Text(error)
         }
     }
 

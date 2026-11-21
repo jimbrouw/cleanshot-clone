@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import AVFoundation
 import AVKit
+import Speech
 import UniformTypeIdentifiers
 
 /// Reviews a finalized take without modifying its source file.
@@ -40,7 +41,7 @@ private final class TakeReviewModel: ObservableObject {
     @Published var anyone = false
     @Published var driveLink: URL?
     @Published var captions: [CaptionCue] = []
-    @Published var captionStatus = "Preparing captions…"
+    @Published var captionStatus = "Generate captions when you need them."
     @Published var captionsEnabled = true
     @Published var playhead: Double = 0
     @Published var editedCopy: URL?
@@ -114,7 +115,9 @@ private final class TakeReviewModel: ObservableObject {
         if let saved = TakeCaptions.load(for: url) {
             captions = saved
             captionStatus = saved.isEmpty ? "No speech was detected." : "Saved captions loaded."
-        } else { transcribe() }
+        } else if SFSpeechRecognizer.authorizationStatus() == .authorized {
+            transcribe()
+        }
         Task {
             do {
                 let asset = AVURLAsset(url: url)
@@ -201,6 +204,21 @@ enum TakeTrimmer {
     }
 }
 
+private struct TakePlaybackView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .inline
+        view.player = player
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player { view.player = player }
+    }
+}
+
 private struct TakeReviewView: View {
     @ObservedObject var model: TakeReviewModel
     @ObservedObject private var drive = GoogleDrive.shared
@@ -208,7 +226,7 @@ private struct TakeReviewView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(model.playable ? "Saved on this Mac" : "Checking local recording…").font(.headline)
             ZStack(alignment: .bottom) {
-                VideoPlayer(player: model.player).frame(minHeight: 220)
+                TakePlaybackView(player: model.player).frame(minHeight: 220)
                 if model.captionsEnabled && !model.activeCaption.isEmpty {
                     Text(model.activeCaption).padding(8).background(.black.opacity(0.8)).foregroundStyle(.white).cornerRadius(6).padding(.bottom, 38).allowsHitTesting(false)
                 }
@@ -218,7 +236,7 @@ private struct TakeReviewView: View {
                 Text(model.captionStatus).font(.caption).textSelection(.enabled)
                 Spacer()
                 Button("Export Captions") { model.exportCaptions() }.disabled(model.captions.isEmpty)
-                Button("Retry") { model.transcribe() }.disabled(!model.captions.isEmpty)
+                Button("Generate Captions") { model.transcribe() }.disabled(!model.captions.isEmpty)
             }
             if !model.captions.isEmpty {
                 DisclosureGroup("Correct captions") {

@@ -40,9 +40,7 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
             }
 
         SystemPermissionsManager.shared.refreshStatus()
-        if !SettingsStore.shared.hasCompletedOnboarding
-            || !SystemPermissionsManager.shared.hasScreenRecording
-            || !SystemPermissionsManager.shared.hasAccessibility {
+        if !SettingsStore.shared.hasCompletedOnboarding {
             DispatchQueue.main.async {
                 OnboardingWindowController.shared.show()
             }
@@ -51,9 +49,7 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         SystemPermissionsManager.shared.refreshStatus()
-        if !SettingsStore.shared.hasCompletedOnboarding
-            || !SystemPermissionsManager.shared.hasScreenRecording
-            || !SystemPermissionsManager.shared.hasAccessibility {
+        if !SettingsStore.shared.hasCompletedOnboarding {
             OnboardingWindowController.shared.show()
         } else if !flag {
             AllInOneHUDController.shared.show()
