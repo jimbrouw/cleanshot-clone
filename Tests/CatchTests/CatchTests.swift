@@ -553,12 +553,21 @@ final class CatchTests: XCTestCase {
         let camera = CameraBubbleController()
         XCTAssertEqual(camera.shape, .circle)
         XCTAssertEqual(camera.bubbleSize, .medium)
+        XCTAssertEqual(camera.panelSize, CGSize(width: 180, height: 180))
         camera.toggleShape()
         XCTAssertEqual(camera.shape, .squircle)
+        XCTAssertEqual(camera.panelSize, CGSize(width: 180, height: 180))
+        camera.toggleShape()
+        XCTAssertEqual(camera.shape, .portrait)
+        XCTAssertEqual(camera.panelSize, CGSize(width: 180, height: 320))
         camera.cycleSize()
         XCTAssertEqual(camera.bubbleSize, .large)
+        XCTAssertEqual(camera.panelSize.width / camera.panelSize.height, 9.0 / 16.0, accuracy: 0.0001)
         camera.cycleSize()
         XCTAssertEqual(camera.bubbleSize, .small)
+        XCTAssertEqual(camera.panelSize.width / camera.panelSize.height, 9.0 / 16.0, accuracy: 0.0001)
+        camera.toggleShape()
+        XCTAssertEqual(camera.shape, .circle)
 
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("LoomTest-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -744,6 +753,92 @@ final class CatchTests: XCTestCase {
         XCTAssertEqual(video.count, 1)
         XCTAssertEqual(audio.count, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    @MainActor
+    func testRegularDesktopAppModeMainMenuAndReopen() throws {
+        // 1. Activation policy must be regular (Dock + Command+Tab)
+        XCTAssertEqual(CatchAppRunner.preferredActivationPolicy, .regular)
+
+        // 2. Resources/Info.plist must not hide Catch as an LSUIElement agent app
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let plistURL = repoRoot.appendingPathComponent("Resources/Info.plist")
+        let plistData = try Data(contentsOf: plistURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any]
+        )
+        XCTAssertNotEqual(plist["LSUIElement"] as? Bool, true)
+        XCTAssertEqual(plist["CFBundleIconFile"] as? String, "AppIcon")
+
+        // 3. Standard macOS main menu with native shortcuts
+        let mainMenu = CatchAppRunner.shared.buildMainMenu()
+        let topMenus = mainMenu.items.compactMap(\.submenu)
+        XCTAssertEqual(topMenus.map(\.title), ["Catch", "File", "Edit", "Capture", "Window"])
+
+        let catchMenu = try XCTUnwrap(topMenus.first { $0.title == "Catch" })
+        XCTAssertEqual(catchMenu.item(withTitle: "Settings...")?.keyEquivalent, ",")
+        XCTAssertEqual(catchMenu.item(withTitle: "Hide Catch")?.keyEquivalent, "h")
+        XCTAssertEqual(catchMenu.item(withTitle: "Quit Catch")?.keyEquivalent, "q")
+
+        let fileMenu = try XCTUnwrap(topMenus.first { $0.title == "File" })
+        XCTAssertEqual(fileMenu.item(withTitle: "Close Window")?.keyEquivalent, "w")
+
+        let editMenu = try XCTUnwrap(topMenus.first { $0.title == "Edit" })
+        XCTAssertEqual(editMenu.item(withTitle: "Copy")?.keyEquivalent, "c")
+        XCTAssertEqual(editMenu.item(withTitle: "Paste")?.keyEquivalent, "v")
+        XCTAssertEqual(editMenu.item(withTitle: "Select All")?.keyEquivalent, "a")
+
+        let windowMenu = try XCTUnwrap(topMenus.first { $0.title == "Window" })
+        XCTAssertEqual(windowMenu.item(withTitle: "Minimize")?.keyEquivalent, "m")
+        XCTAssertNotNil(windowMenu.item(withTitle: "Capture History"))
+
+        // 4. Reopen resolution handles visible windows, minimized windows, status-bar windows, and empty state
+        final class MockReopenWindow: NSWindow {
+            var mockVisible: Bool
+            var mockMiniaturized: Bool
+            var mockCanBecomeKey: Bool
+
+            init(styleMask: NSWindow.StyleMask, level: NSWindow.Level = .normal, visible: Bool, miniaturized: Bool = false, canBecomeKey: Bool = true) {
+                self.mockVisible = visible
+                self.mockMiniaturized = miniaturized
+                self.mockCanBecomeKey = canBecomeKey
+                super.init(contentRect: NSRect(x: 0, y: 0, width: 320, height: 240), styleMask: styleMask, backing: .buffered, defer: true)
+                self.level = level
+            }
+
+            override var isVisible: Bool { mockVisible }
+            override var isMiniaturized: Bool { mockMiniaturized }
+            override var canBecomeKey: Bool { mockCanBecomeKey }
+        }
+
+        let statusBarWindow = MockReopenWindow(styleMask: [.borderless], level: .statusBar, visible: true, canBecomeKey: false)
+        let floatingHUD = MockReopenWindow(styleMask: [.borderless], level: .floating, visible: true, canBecomeKey: true)
+        let historyWindow = MockReopenWindow(styleMask: [.titled, .closable, .miniaturizable], visible: true)
+        let minimizedSettings = MockReopenWindow(styleMask: [.titled, .closable, .miniaturizable], visible: false, miniaturized: true)
+
+        XCTAssertEqual(
+            CatchAppRunner.resolveReopenAction(windows: [statusBarWindow, floatingHUD], hasCompletedOnboarding: true, isRecordingActive: false),
+            .showAllInOneHUD
+        )
+        XCTAssertEqual(
+            CatchAppRunner.resolveReopenAction(windows: [statusBarWindow], hasCompletedOnboarding: false, isRecordingActive: false),
+            .showOnboarding
+        )
+        XCTAssertEqual(
+            CatchAppRunner.resolveReopenAction(windows: [statusBarWindow], hasCompletedOnboarding: true, isRecordingActive: true),
+            .keepCurrentSession
+        )
+        XCTAssertEqual(
+            CatchAppRunner.resolveReopenAction(windows: [statusBarWindow, historyWindow], hasCompletedOnboarding: true, isRecordingActive: false),
+            .focusWindow(historyWindow)
+        )
+        XCTAssertEqual(
+            CatchAppRunner.resolveReopenAction(windows: [statusBarWindow, minimizedSettings], hasCompletedOnboarding: true, isRecordingActive: false),
+            .deminiaturizeWindow(minimizedSettings)
+        )
     }
 
 }

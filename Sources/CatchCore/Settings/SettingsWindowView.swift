@@ -274,8 +274,8 @@ public struct SettingsWindowView: View {
             }
             StudioBridgeSettingsView()
 
-            settingsSectionCard(title: "Catch Studio (Camera Bubble + Hidden Teleprompter)", icon: "video.badge.waveform") {
-                Text("Record your screen with a floating Picture-in-Picture camera bubble and an eye-line teleprompter that stays completely hidden from viewers.")
+            settingsSectionCard(title: "Catch Studio (Camera, Teleprompter & Podcast ISO)", icon: "video.badge.waveform") {
+                Text("Record your screen with a floating Loom camera bubble, capture a separate full-resolution 4K HEVC camera ISO with clean screen, or switch to Camera mode for scripted podcasting with synchronized WAV audio stems.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

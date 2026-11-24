@@ -58,8 +58,11 @@ private struct GoogleClientFile: Decodable {
         }
     }
     func connect() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]; panel.message = "Choose the Desktop OAuth client JSON downloaded from Google Cloud."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard !connecting, credentials == nil else { return }
+        guard let url = Bundle.main.url(forResource: "GoogleDriveOAuthClient", withExtension: "json") else {
+            message = "Google Drive sign-in hasn’t been set up for this build of Catch."
+            return
+        }
         do {
             let client = try JSONDecoder().decode(GoogleClientFile.self, from: Data(contentsOf: url)).installed
             connecting = true; message = "Complete Google sign-in in your browser."
@@ -71,7 +74,7 @@ private struct GoogleClientFile: Decodable {
                 } catch { message = "Could not connect: \(error.localizedDescription)" }
                 connecting = false
             }
-        } catch { message = "Choose a valid Google Desktop OAuth client JSON: \(error.localizedDescription)" }
+        } catch { message = "This build of Catch has an invalid Google Drive sign-in configuration." }
     }
     func disconnect() {
         DriveVault.delete("credentials"); credentials = nil; account = nil
@@ -122,7 +125,8 @@ private enum DriveAPI {
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = ["client_id": clientID, "redirect_uri": redirect, "response_type": "code", "scope": "https://www.googleapis.com/auth/drive.file", "code_challenge": challenge, "code_challenge_method": "S256", "state": state, "access_type": "offline", "prompt": "consent"].map { URLQueryItem(name: $0.key, value: $0.value) }
         let authorizationURL = components.url!
-        _ = await MainActor.run { NSWorkspace.shared.open(authorizationURL) }
+        let opened = await MainActor.run { NSWorkspace.shared.open(authorizationURL) }
+        guard opened else { throw DriveError("Could not open your browser. Try connecting again.") }
         let query = try await listener.receive()
         guard query["state"] == state else { throw DriveError("Google sign-in state did not match. Try again.") }
         guard let code = query["code"] else { throw DriveError("Google sign-in was cancelled or denied.") }

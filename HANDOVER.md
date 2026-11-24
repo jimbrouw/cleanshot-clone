@@ -59,7 +59,7 @@ git diff --check
 swift build -c release
 ```
 
-Keep the last usable app bundle. Package a separate preview using the layout and signing steps in [scripts/build-app.sh](scripts/build-app.sh); the script itself replaces `build/Catch.app`. Verify the new bundle's signature. Run the live acceptance checks from the packaged app. Inspect the exported tracks and duration with a media probe if available, and play the take to check the actual picture and sound.
+Use `build/Catch.app` as the regular test app. Build and test before replacing it, and quit Catch before the replacement. Use the same signing identity on each build by setting `CATCH_CODESIGN_IDENTITY` in [scripts/build-app.sh](scripts/build-app.sh). Ad hoc builds can still require fresh macOS privacy grants after a rebuild. Run the live acceptance checks from the packaged app. Inspect the exported tracks and duration with a media probe if available, and play the take to check the actual picture and sound.
 
 Report the preview path, what was checked in playback, anything that still needs the user's hardware or participation, and the next action. Use the completion ladder: scoped → code complete → locally verified → integrated/live verified → production proven. Keep fixture results and live recording results separate.
 
@@ -75,7 +75,13 @@ Report the preview path, what was checked in playback, anything that still needs
 
 ### Google Drive preview setup and verification
 
-The preview's **Settings → Screen Recording → Connect Google Drive** asks for the downloaded Google Cloud **Desktop app** OAuth client JSON. Enable Drive API v3, configure the OAuth consent screen, and add the Google account as a test user while the app is in Testing. Keep the JSON private; Catch stores the client credentials and refresh token in the macOS Keychain. Sign in through the system browser. Disconnect removes Catch's saved credentials; it does not delete uploaded files or revoke links. Manage those in Drive.
+Register a **Desktop app** OAuth client once for Catch. Enable Drive API v3, configure the OAuth consent screen for `drive.file`, and add the Google account as a test user while the app is in Testing. Keep the downloaded client JSON outside the repository and include it when packaging the preview.
+
+```bash
+CATCH_GOOGLE_DRIVE_OAUTH_JSON=/absolute/path/to/client.json bash scripts/build-app.sh
+```
+
+In the packaged app, **Settings → Screen Recording → Connect Google Drive** opens Google’s sign-in page in the default browser. After consent, Catch shows the connected account and stores its refresh credential in the macOS Keychain. Disconnect removes the local credentials. Manage access to existing uploads and links in Drive.
 
 The initial Drive preview uploaded the full source MP4. The captions preview below also allows an explicitly selected edited copy. Restricted is the default. Retry from the same unchanged file and connected account reuses the saved Drive file ID and upload session; if a session expires, retry again to start a new session with that ID. Google may need time to process a video after upload. These paths still require the live account, sharing, interrupted-transfer, and signed-out playback checks above before claiming live verification.
 

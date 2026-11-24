@@ -46,9 +46,27 @@ struct StudioInputSelectors: View {
     var body: some View {
         Group {
             if compact {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     cameraPicker
+                    if studio.captureMode != .cameraOnly {
+                        cameraModePicker
+                        if studio.cameraRecordingMode == .floatingBubble {
+                            cameraFramePicker
+                        }
+                    }
+                    if studio.captureMode == .cameraOnly || studio.cameraRecordingMode == .separateFullResFile {
+                        cameraAspectRatioPicker
+                    }
+                    if studio.captureMode == .cameraOnly, let badge = camera.activeFormatBadge {
+                        Text("\(badge) · HEVC")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.white.opacity(0.08)))
+                    }
                     microphonePicker
+                    wavStemsToggle
                     if let error = camera.cameraError, camera.isVisible {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
@@ -60,7 +78,11 @@ struct StudioInputSelectors: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     cameraPicker
+                    cameraModePicker
+                    cameraAspectRatioPicker
+                    cameraFramePicker
                     microphonePicker
+                    wavStemsToggle
                     if let error = camera.cameraError, camera.isVisible {
                         Text(error).font(.caption).foregroundStyle(.secondary)
                     }
@@ -70,6 +92,32 @@ struct StudioInputSelectors: View {
         .controlSize(compact ? .small : .regular)
         .disabled(studio.state != .idle)
         .onAppear { devices.refresh() }
+    }
+
+    private var cameraModePicker: some View {
+        Picker("Camera Output", selection: $studio.cameraRecordingMode) {
+            ForEach(CameraRecordingMode.allCases, id: \.self) { mode in
+                Text(compact ? mode.label : mode.settingsLabel).tag(mode)
+            }
+        }
+        .pickerStyle(.menu)
+        .help("Choose between floating Loom camera bubble or a separate full-resolution HEVC camera file with clean screen")
+    }
+
+    private var cameraAspectRatioPicker: some View {
+        Picker(compact ? "Aspect" : "Camera Aspect Ratio", selection: $studio.cameraAspectRatio) {
+            ForEach(CameraAspectRatioPreference.allCases, id: \.self) { aspect in
+                Text(compact ? aspect.label : aspect.settingsLabel).tag(aspect)
+            }
+        }
+        .pickerStyle(.menu)
+        .help("Choose 16:9 widescreen (1080p / 4K) or full-sensor max resolution (e.g. 4:3 open-gate)")
+    }
+
+    private var wavStemsToggle: some View {
+        Toggle(compact ? "WAV Stems" : "Export separate 48 kHz 24-bit WAV audio stems", isOn: $studio.exportAudioStems)
+            .toggleStyle(.checkbox)
+            .help("Save synchronized uncompressed WAV stems (microphone and system audio) alongside the video for editors")
     }
 
     private var cameraPicker: some View {
@@ -92,6 +140,16 @@ struct StudioInputSelectors: View {
                 settings.recordingMicrophoneID = id
             }
         ), available: devices.microphones)
+    }
+
+    private var cameraFramePicker: some View {
+        Picker("Camera Frame", selection: $camera.shape) {
+            ForEach(CameraBubbleShape.allCases, id: \.self) { shape in
+                Text(shape.label).tag(shape)
+            }
+        }
+        .pickerStyle(.menu)
+        .help("Choose the shape of the floating camera window")
     }
 
     private func inputPicker(_ title: String, selection: Binding<String?>, available: [AVCaptureDevice]) -> some View {
