@@ -11,12 +11,17 @@ public final class TakeReviewWindowController {
     private var windows: [NSWindow] = []
 
     public func show(url: URL) {
+        let discovered = Self.discoverBundle(for: url)
+        show(bundle: discovered)
+    }
+
+    public func show(bundle: RecordedTakeBundle) {
         DispatchQueue.main.async {
-            let model = TakeReviewModel(url: url)
-            let window = NSWindow(contentRect: NSRect(x: 180, y: 160, width: 800, height: 650),
+            let model = TakeReviewModel(bundle: bundle)
+            let window = NSWindow(contentRect: NSRect(x: 180, y: 140, width: 840, height: 700),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
-            window.title = "Review Take — \(url.lastPathComponent)"
+            window.title = "Review Take — \(bundle.primaryVideoURL.lastPathComponent)"
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: TakeReviewView(model: model))
             self.windows.removeAll { !$0.isVisible }
@@ -25,10 +30,55 @@ public final class TakeReviewWindowController {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
+
+    static func discoverBundle(for url: URL) -> RecordedTakeBundle {
+        let fm = FileManager.default
+        let folder = url.deletingLastPathComponent()
+        let stem = url.deletingPathExtension().lastPathComponent
+        let base: String?
+        if stem.hasSuffix("-screen") {
+            base = String(stem.dropLast("-screen".count))
+        } else if stem.hasSuffix("-camera") {
+            base = String(stem.dropLast("-camera".count))
+        } else {
+            base = nil
+        }
+
+        guard let base else {
+            return RecordedTakeBundle(primaryVideoURL: url)
+        }
+        let screenCandidate = folder.appendingPathComponent("\(base)-screen.mp4")
+        let cameraCandidate = folder.appendingPathComponent("\(base)-camera.mp4")
+        let micCandidate = folder.appendingPathComponent("\(base)-mic.wav")
+        let sysCandidate = folder.appendingPathComponent("\(base)-system-audio.wav")
+
+        let screenURL = fm.fileExists(atPath: screenCandidate.path) ? screenCandidate : nil
+        let cameraURL = fm.fileExists(atPath: cameraCandidate.path) ? cameraCandidate : nil
+        let micURL = fm.fileExists(atPath: micCandidate.path) ? micCandidate : nil
+        let sysURL = fm.fileExists(atPath: sysCandidate.path) ? sysCandidate : nil
+        let isTakeFolder = folder.lastPathComponent == base
+
+        return RecordedTakeBundle(
+            primaryVideoURL: url,
+            screenVideoURL: screenURL,
+            cameraVideoURL: cameraURL,
+            cameraResolution: nil,
+            microphoneStemURL: micURL,
+            systemAudioStemURL: sysURL,
+            takeDirectoryURL: isTakeFolder ? folder : nil
+        )
+    }
+}
+
+private enum ReviewVideoTrack: String, CaseIterable {
+    case screen = "Screen"
+    case camera = "Camera (Full-Res)"
 }
 
 private final class TakeReviewModel: ObservableObject {
-    let source: URL
+    let bundle: RecordedTakeBundle
+    @Published var selectedTrack: ReviewVideoTrack
+    @Published private(set) var source: URL
     let player: AVPlayer
     @Published var duration: Double = 0
     @Published var playable = false
@@ -43,20 +93,68 @@ private final class TakeReviewModel: ObservableObject {
     @Published var captions: [CaptionCue] = []
     @Published var captionStatus = "Generate captions when you need them."
     @Published var captionsEnabled = true
+    @Published var transcribing = false
     @Published var playhead: Double = 0
     @Published var editedCopy: URL?
     @Published var shareEdited = false
     private var timeObserver: Any?
+    private var transcriptionRequestID = UUID()
+
+    var hasBothVideoTracks: Bool {
+        bundle.screenVideoURL != nil && bundle.cameraVideoURL != nil
+    }
+
+    var assetSummaryBadges: [String] {
+        var badges: [String] = []
+        if bundle.screenVideoURL != nil { badges.append("Screen MP4") }
+        if bundle.cameraVideoURL != nil {
+            if let res = bundle.cameraResolution {
+                badges.append("Camera \(res) HEVC")
+            } else {
+                badges.append("Camera HEVC")
+            }
+        }
+        if bundle.microphoneStemURL != nil { badges.append("Mic WAV") }
+        if bundle.systemAudioStemURL != nil { badges.append("System WAV") }
+        return badges
+    }
 
     var activeCaption: String {
         captions.first { playhead >= $0.start && playhead < $0.end }?.text ?? ""
     }
 
+    func switchTrack(to track: ReviewVideoTrack) {
+        guard track != selectedTrack else { return }
+        let targetURL: URL?
+        switch track {
+        case .screen: targetURL = bundle.screenVideoURL
+        case .camera: targetURL = bundle.cameraVideoURL
+        }
+        guard let targetURL else { return }
+        player.pause()
+        transcriptionRequestID = UUID()
+        transcribing = false
+        selectedTrack = track
+        source = targetURL
+        editedCopy = nil
+        shareEdited = false
+        player.replaceCurrentItem(with: AVPlayerItem(url: targetURL))
+        loadSourceMetadata(for: targetURL)
+    }
+
     func transcribe() {
-        guard captionStatus != "Transcribing on this Mac…" else { return }
+        guard !transcribing else { return }
+        let targetURL = source
+        let requestID = UUID()
+        transcriptionRequestID = requestID
+        transcribing = true
         captionStatus = "Transcribing on this Mac…"
-        TakeCaptions.recognize(url: source) { result in
+        TakeCaptions.recognize(url: targetURL) { [weak self] result in
             DispatchQueue.main.async {
+                guard let self,
+                      self.source == targetURL,
+                      self.transcriptionRequestID == requestID else { return }
+                self.transcribing = false
                 switch result {
                 case .success(let cues):
                     self.captions = cues
@@ -108,15 +206,28 @@ private final class TakeReviewModel: ObservableObject {
 
     deinit { if let timeObserver { player.removeTimeObserver(timeObserver) } }
 
-    init(url: URL) {
-        source = url
-        player = AVPlayer(url: url)
+    init(bundle: RecordedTakeBundle) {
+        self.bundle = bundle
+        let initialTrack: ReviewVideoTrack = (bundle.screenVideoURL == nil && bundle.cameraVideoURL != nil) ? .camera : .screen
+        self.selectedTrack = initialTrack
+        let initialURL = (initialTrack == .camera ? bundle.cameraVideoURL : bundle.screenVideoURL) ?? bundle.primaryVideoURL
+        self.source = initialURL
+        self.player = AVPlayer(url: initialURL)
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main) { [weak self] time in self?.playhead = time.seconds }
-        if let saved = TakeCaptions.load(for: url) {
-            captions = saved
-            captionStatus = saved.isEmpty ? "No speech was detected." : "Saved captions loaded."
-        } else if SFSpeechRecognizer.authorizationStatus() == .authorized {
-            transcribe()
+        loadSourceMetadata(for: initialURL)
+    }
+
+    private func loadSourceMetadata(for url: URL) {
+        playable = false
+        duration = 0
+        start = 0
+        end = 0
+        captions = []
+        captionStatus = "Generate captions when you need them."
+        let savedCaptions = TakeCaptions.load(for: url)
+        if let savedCaptions {
+            captions = savedCaptions
+            captionStatus = savedCaptions.isEmpty ? "No speech was detected." : "Saved captions loaded."
         }
         Task {
             do {
@@ -125,9 +236,20 @@ private final class TakeReviewModel: ObservableObject {
                 let time = try await asset.load(.duration)
                 let seconds = time.seconds
                 guard seconds.isFinite, seconds > 0 else { throw ReviewError.invalidDuration }
-                await MainActor.run { self.duration = seconds; self.end = seconds; self.playable = true }
+                await MainActor.run {
+                    guard self.source == url else { return }
+                    self.duration = seconds
+                    self.end = seconds
+                    self.playable = true
+                    if savedCaptions == nil && SFSpeechRecognizer.authorizationStatus() == .authorized {
+                        self.transcribe()
+                    }
+                }
             } catch {
-                await MainActor.run { self.message = "Could not open take: \(error.localizedDescription)" }
+                await MainActor.run {
+                    guard self.source == url else { return }
+                    self.message = "Could not open take: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -224,7 +346,40 @@ private struct TakeReviewView: View {
     @ObservedObject private var drive = GoogleDrive.shared
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(model.playable ? "Saved on this Mac" : "Checking local recording…").font(.headline)
+            HStack(spacing: 10) {
+                Text(model.playable ? "Saved on this Mac" : "Checking local recording…").font(.headline)
+                Spacer()
+                if model.hasBothVideoTracks {
+                    Picker("Track", selection: Binding(
+                        get: { model.selectedTrack },
+                        set: { model.switchTrack(to: $0) }
+                    )) {
+                        Text("Screen").tag(ReviewVideoTrack.screen)
+                        Text("Camera (Full-Res)").tag(ReviewVideoTrack.camera)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
+                }
+            }
+            if model.bundle.hasMultipleAssets || model.bundle.cameraVideoURL != nil {
+                HStack(spacing: 6) {
+                    ForEach(model.assetSummaryBadges, id: \.self) { badge in
+                        Text(badge)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.secondary.opacity(0.16)))
+                    }
+                    Spacer()
+                    if let folder = model.bundle.takeDirectoryURL {
+                        Button("Show Take Folder in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting(model.bundle.allAssetURLs)
+                            _ = folder
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
             ZStack(alignment: .bottom) {
                 TakePlaybackView(player: model.player).frame(minHeight: 220)
                 if model.captionsEnabled && !model.activeCaption.isEmpty {
@@ -235,8 +390,9 @@ private struct TakeReviewView: View {
                 Toggle("CC", isOn: $model.captionsEnabled).toggleStyle(.button)
                 Text(model.captionStatus).font(.caption).textSelection(.enabled)
                 Spacer()
-                Button("Export Captions") { model.exportCaptions() }.disabled(model.captions.isEmpty)
-                Button("Generate Captions") { model.transcribe() }.disabled(!model.captions.isEmpty)
+                Button("Export Captions") { model.exportCaptions() }.disabled(model.captions.isEmpty || model.transcribing)
+                Button(model.captions.isEmpty ? "Generate Captions" : "Regenerate Captions") { model.transcribe() }
+                    .disabled(model.transcribing || model.duration <= 0)
             }
             if !model.captions.isEmpty {
                 DisclosureGroup("Correct captions") {

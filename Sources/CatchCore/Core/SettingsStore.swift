@@ -182,6 +182,9 @@ public final class SettingsStore: ObservableObject {
     @Published public var recordingRecordSystemAudio: Bool { didSet { save("recordingRecordSystemAudio", recordingRecordSystemAudio) } }
     @Published public var recordingCameraID: String? { didSet { save("recordingCameraID", recordingCameraID) } }
     var recordingCameraShape: CameraBubbleShape { didSet { save("recordingCameraShape", recordingCameraShape.rawValue) } }
+    @Published public var recordingCameraMode: CameraRecordingMode { didSet { save("recordingCameraMode", recordingCameraMode.rawValue) } }
+    @Published public var recordingCameraAspectRatio: CameraAspectRatioPreference { didSet { save("recordingCameraAspectRatio", recordingCameraAspectRatio.rawValue) } }
+    @Published public var recordingExportAudioStems: Bool { didSet { save("recordingExportAudioStems", recordingExportAudioStems) } }
     @Published public var recordingMicrophoneID: String? { didSet { save("recordingMicrophoneID", recordingMicrophoneID) } }
     @Published public var recordingGifFrameRate: Int { didSet { save("recordingGifFrameRate", recordingGifFrameRate) } }
 
@@ -279,6 +282,9 @@ public final class SettingsStore: ObservableObject {
         self.recordingRecordSystemAudio = defaults.object(forKey: keyPrefix + "recordingRecordSystemAudio") as? Bool ?? true
         self.recordingCameraID = defaults.string(forKey: keyPrefix + "recordingCameraID")
         self.recordingCameraShape = CameraBubbleShape(rawValue: defaults.string(forKey: keyPrefix + "recordingCameraShape") ?? "") ?? .circle
+        self.recordingCameraMode = CameraRecordingMode(rawValue: defaults.string(forKey: keyPrefix + "recordingCameraMode") ?? "") ?? .floatingBubble
+        self.recordingCameraAspectRatio = CameraAspectRatioPreference(rawValue: defaults.string(forKey: keyPrefix + "recordingCameraAspectRatio") ?? "") ?? .widescreen16x9
+        self.recordingExportAudioStems = defaults.object(forKey: keyPrefix + "recordingExportAudioStems") as? Bool ?? false
         self.recordingMicrophoneID = defaults.string(forKey: keyPrefix + "recordingMicrophoneID")
         self.recordingGifFrameRate = defaults.object(forKey: keyPrefix + "recordingGifFrameRate") as? Int ?? 15
 

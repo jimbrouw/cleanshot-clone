@@ -16,7 +16,7 @@ public final class AllInOneHUDController {
             }
 
             let screen = CaptureEngine.shared.resolveScreen(displayIndex: displayIndex)
-            let width: CGFloat = 860
+            let width: CGFloat = min(940, max(820, screen.visibleFrame.width - 32))
             let height: CGFloat = 132
             let frame = CGRect(
                 x: screen.frame.midX - width / 2,
@@ -143,6 +143,10 @@ private struct AllInOneHUDView: View {
                     hudButton("Video", systemImage: "video.badge.waveform", shortcut: "⌥L") {
                         onDismiss()
                         ScreenRecordingStudio.shared.presentStudio()
+                    }
+                    hudButton("Podcast", systemImage: "camera.aperture", shortcut: "4K") {
+                        onDismiss()
+                        ScreenRecordingStudio.shared.presentStudio(captureMode: .cameraOnly, exportWAVStems: true)
                     }
                     hudButton("OCR", systemImage: "text.viewfinder", shortcut: "⌥2") {
                         onDismiss()

@@ -5,22 +5,36 @@ import Combine
 
 public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     public static let shared = CatchAppRunner()
+    public static let preferredActivationPolicy: NSApplication.ActivationPolicy = .regular
+
+    public enum ReopenAction: Equatable {
+        case focusWindow(NSWindow)
+        case deminiaturizeWindow(NSWindow)
+        case showOnboarding
+        case showAllInOneHUD
+        case keepCurrentSession
+    }
 
     private var statusItem: NSStatusItem?
+    private var statusMenuTrackingObserver: NSObjectProtocol?
     private var hotKeyRefs: [EventHotKeyRef] = []
     private var hotKeyHandlers: [UInt32: () -> Void] = [:]
     private var isHotKeyHandlerInstalled = false
     private var clipboardMonitoringPreference: AnyCancellable?
+    private var menuBarIconPreference: AnyCancellable?
+    private var hasHandledOpenEvent = false
 
     public static func run() {
         let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
+        app.setActivationPolicy(preferredActivationPolicy)
         app.delegate = CatchAppRunner.shared
         app.run()
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(Self.preferredActivationPolicy)
         registerAppleEventHandler()
+        setupMainMenu()
         setupMenuBar()
         reregisterHotkeys()
         NotificationCenter.default.addObserver(forName: .catchHotkeysShouldReload, object: nil, queue: .main) { [weak self] _ in
@@ -38,26 +52,92 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
                     ClipboardHistoryStore.shared.stopMonitoring()
                 }
             }
+        menuBarIconPreference = SettingsStore.shared.$showMenuBarIcon
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                self?.updateMenuBarVisibility(enabled)
+            }
 
         SystemPermissionsManager.shared.refreshStatus()
-        if !SettingsStore.shared.hasCompletedOnboarding {
-            DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if !SettingsStore.shared.hasCompletedOnboarding {
                 OnboardingWindowController.shared.show()
+            } else if !self.hasHandledOpenEvent {
+                var candidates = NSApp.orderedWindows
+                for window in NSApp.windows where !candidates.contains(window) {
+                    candidates.append(window)
+                }
+                if Self.resolveReopenAction(
+                    windows: candidates,
+                    hasCompletedOnboarding: true,
+                    isRecordingActive: ScreenRecordingStudio.shared.state != .idle
+                ) == .showAllInOneHUD {
+                    NSApp.activate(ignoringOtherApps: true)
+                    AllInOneHUDController.shared.show()
+                }
             }
         }
     }
 
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    public static func isStandardAppWindow(_ window: NSWindow) -> Bool {
+        guard window.level != .statusBar else { return false }
+        guard !NSStringFromClass(type(of: window)).contains("StatusBar") else { return false }
+        return window.styleMask.contains(.titled) && window.canBecomeKey
+    }
+
+    public static func resolveReopenAction(
+        windows: [NSWindow],
+        hasCompletedOnboarding: Bool,
+        isRecordingActive: Bool
+    ) -> ReopenAction {
+        let standardWindows = windows.filter(isStandardAppWindow)
+        if let visibleWindow = standardWindows.first(where: { $0.isVisible && !$0.isMiniaturized }) {
+            return .focusWindow(visibleWindow)
+        }
+        if let minimizedWindow = standardWindows.first(where: { $0.isMiniaturized }) {
+            return .deminiaturizeWindow(minimizedWindow)
+        }
+        if isRecordingActive {
+            return .keepCurrentSession
+        }
+        return hasCompletedOnboarding ? .showAllInOneHUD : .showOnboarding
+    }
+
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         SystemPermissionsManager.shared.refreshStatus()
-        if !SettingsStore.shared.hasCompletedOnboarding {
+        sender.activate(ignoringOtherApps: true)
+        var candidates = sender.orderedWindows
+        for window in sender.windows where !candidates.contains(window) {
+            candidates.append(window)
+        }
+        switch Self.resolveReopenAction(
+            windows: candidates,
+            hasCompletedOnboarding: SettingsStore.shared.hasCompletedOnboarding,
+            isRecordingActive: ScreenRecordingStudio.shared.state != .idle
+        ) {
+        case .focusWindow(let window):
+            window.makeKeyAndOrderFront(nil)
+        case .deminiaturizeWindow(let window):
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+        case .showOnboarding:
             OnboardingWindowController.shared.show()
-        } else if !flag {
+        case .showAllInOneHUD:
             AllInOneHUDController.shared.show()
+        case .keepCurrentSession:
+            break
         }
         return true
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
+        hasHandledOpenEvent = true
         for url in urls {
             if url.isFileURL {
                 AnnotateWindowController.openFile(url: url)
@@ -81,11 +161,128 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
               let url = URL(string: urlStr) else {
             return
         }
+        hasHandledOpenEvent = true
         URLSchemeRouter.execute(url: url)
     }
 
+    public func setupMainMenu() {
+        let app = NSApplication.shared
+        let mainMenu = buildMainMenu()
+        app.mainMenu = mainMenu
+        if let appMenu = mainMenu.items.first?.submenu,
+           let servicesItem = appMenu.item(withTitle: "Services") {
+            app.servicesMenu = servicesItem.submenu
+        }
+        if let windowItem = mainMenu.item(withTitle: "Window") {
+            app.windowsMenu = windowItem.submenu
+        }
+    }
+
+    public func buildMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+
+        // 1. Catch (Application) menu
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "Catch")
+        appMenu.addItem(makeResponderItem("About Catch", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), key: ""))
+        appMenu.addItem(makeItem("Onboarding & Feature Tour...", action: #selector(cmdOpenOnboarding), key: ""))
+        appMenu.addItem(.separator())
+        appMenu.addItem(makeItem("Settings...", action: #selector(cmdOpenSettings), key: ","))
+        appMenu.addItem(.separator())
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        servicesItem.submenu = NSMenu(title: "Services")
+        appMenu.addItem(servicesItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(makeResponderItem("Hide Catch", action: #selector(NSApplication.hide(_:)), key: "h"))
+        appMenu.addItem(makeResponderItem("Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), key: "h", modifiers: [.command, .option]))
+        appMenu.addItem(makeResponderItem("Show All", action: #selector(NSApplication.unhideAllApplications(_:)), key: ""))
+        appMenu.addItem(.separator())
+        appMenu.addItem(makeResponderItem("Quit Catch", action: #selector(NSApplication.terminate(_:)), key: "q"))
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        // 2. File menu
+        let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(makeItem("Open in Annotate...", action: #selector(cmdOpenAnnotate), key: "o"))
+        fileMenu.addItem(makeItem("Open from Clipboard", action: #selector(cmdOpenFromClipboard), key: ""))
+        fileMenu.addItem(makeItem("Pin Screenshot...", action: #selector(cmdPinFile), key: ""))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(makeResponderItem("Close Window", action: #selector(NSWindow.performClose(_:)), key: "w"))
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+
+        // 3. Edit menu
+        let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(makeResponderItem("Undo", action: Selector(("undo:")), key: "z"))
+        editMenu.addItem(makeResponderItem("Redo", action: Selector(("redo:")), key: "z", modifiers: [.command, .shift]))
+        editMenu.addItem(.separator())
+        editMenu.addItem(makeResponderItem("Cut", action: #selector(NSText.cut(_:)), key: "x"))
+        editMenu.addItem(makeResponderItem("Copy", action: #selector(NSText.copy(_:)), key: "c"))
+        editMenu.addItem(makeResponderItem("Paste", action: #selector(NSText.paste(_:)), key: "v"))
+        editMenu.addItem(makeResponderItem("Delete", action: #selector(NSText.delete(_:)), key: ""))
+        editMenu.addItem(makeResponderItem("Select All", action: #selector(NSText.selectAll(_:)), key: "a"))
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        // 4. Capture menu
+        let captureMenuItem = NSMenuItem(title: "Capture", action: nil, keyEquivalent: "")
+        let captureMenu = NSMenu(title: "Capture")
+        captureMenu.addItem(makeItem("All-In-One", action: #selector(cmdAllInOne), key: "5", modifiers: [.command, .shift]))
+        captureMenu.addItem(.separator())
+        captureMenu.addItem(makeItem("Capture Area", action: #selector(cmdCaptureArea), key: "4", modifiers: [.command, .shift]))
+        captureMenu.addItem(makeItem("Capture Previous Area", action: #selector(cmdCapturePreviousArea), key: ""))
+        captureMenu.addItem(makeItem("Capture Fullscreen", action: #selector(cmdCaptureFullscreen), key: "3", modifiers: [.command, .shift]))
+        captureMenu.addItem(makeItem("Capture Window", action: #selector(cmdCaptureWindow), key: ""))
+        captureMenu.addItem(makeItem("Self-Timer", action: #selector(cmdSelfTimer), key: ""))
+        captureMenu.addItem(makeItem("Scrolling Capture", action: #selector(cmdScrollingCapture), key: ""))
+        captureMenu.addItem(.separator())
+        captureMenu.addItem(makeItem("Catch Studio — Screen + Loom Bubble...", action: #selector(cmdOpenLoomStudio), key: ""))
+        captureMenu.addItem(makeItem("Catch Studio — Dual 4K ISO...", action: #selector(cmdOpenDualISOStudio), key: ""))
+        captureMenu.addItem(makeItem("Catch Studio — Podcast Camera...", action: #selector(cmdOpenPodcastCameraStudio), key: ""))
+        captureMenu.addItem(makeItem("Toggle Teleprompter", action: #selector(cmdToggleTeleprompter), key: ""))
+        captureMenu.addItem(makeItem("Toggle Camera Bubble", action: #selector(cmdToggleCameraBubble), key: ""))
+        captureMenu.addItem(.separator())
+        captureMenu.addItem(makeItem("Capture Text (OCR)", action: #selector(cmdCaptureText), key: "2", modifiers: [.command, .shift]))
+        captureMenu.addItem(makeItem("Read Aloud (Screenshot)", action: #selector(cmdReadAloud), key: ""))
+        captureMenuItem.submenu = captureMenu
+        mainMenu.addItem(captureMenuItem)
+
+        // 5. Window menu
+        let windowMenuItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(makeResponderItem("Minimize", action: #selector(NSWindow.performMiniaturize(_:)), key: "m"))
+        windowMenu.addItem(makeResponderItem("Zoom", action: #selector(NSWindow.performZoom(_:)), key: ""))
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(makeItem("Capture History", action: #selector(cmdOpenHistory), key: ""))
+        windowMenu.addItem(makeItem("Clipboard History", action: #selector(cmdOpenClipboardHistory), key: ""))
+        windowMenu.addItem(makeItem("Restore Last Capture", action: #selector(cmdRestoreLast), key: ""))
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(makeResponderItem("Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), key: ""))
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+
+        return mainMenu
+    }
+
     public func setupMenuBar() {
-        guard SettingsStore.shared.showMenuBarIcon else { return }
+        updateMenuBarVisibility(SettingsStore.shared.showMenuBarIcon)
+    }
+
+    private func updateMenuBarVisibility(_ visible: Bool) {
+        if !visible {
+            if let observer = statusMenuTrackingObserver {
+                NotificationCenter.default.removeObserver(observer)
+                statusMenuTrackingObserver = nil
+            }
+            if let item = statusItem {
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
+            }
+            return
+        }
+        guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let mark = Bundle.module.url(forResource: "CatchMenuBar", withExtension: "png")
             .flatMap { NSImage(contentsOf: $0) }
@@ -98,6 +295,10 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     }
 
     private func buildMenu() -> NSMenu {
+        if let observer = statusMenuTrackingObserver {
+            NotificationCenter.default.removeObserver(observer)
+            statusMenuTrackingObserver = nil
+        }
         let menu = NSMenu()
         menu.addItem(makeItem("Onboarding & Feature Tour...", action: #selector(cmdOpenOnboarding), key: ""))
         menu.addItem(.separator())
@@ -110,11 +311,13 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("Self-Timer", action: #selector(cmdSelfTimer), key: ""))
         menu.addItem(makeItem("Scrolling Capture", action: #selector(cmdScrollingCapture), key: ""))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Catch Studio (Screen + Cam + Teleprompter)...", action: #selector(cmdOpenLoomStudio), key: ""))
+        menu.addItem(makeItem("Catch Studio — Screen + Loom Bubble...", action: #selector(cmdOpenLoomStudio), key: ""))
+        menu.addItem(makeItem("Catch Studio — Dual 4K ISO (Clean Screen + 4K Cam + WAV)...", action: #selector(cmdOpenDualISOStudio), key: ""))
+        menu.addItem(makeItem("Catch Studio — Podcast Camera (Full 4K Cam + Teleprompter + WAV)...", action: #selector(cmdOpenPodcastCameraStudio), key: ""))
         menu.addItem(makeItem("Toggle Teleprompter", action: #selector(cmdToggleTeleprompter), key: ""))
         let endSession = makeItem("End Agent Capture Session", action: #selector(cmdEndAgentCaptureSession), key: "")
         menu.addItem(endSession)
-        NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: menu, queue: nil) { _ in
+        statusMenuTrackingObserver = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: menu, queue: nil) { _ in
             endSession.isHidden = LocalStudioBridge.shared.captureKey == nil
         }
         menu.addItem(makeItem("Toggle Camera Bubble", action: #selector(cmdToggleCameraBubble), key: ""))
@@ -139,9 +342,31 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    private func makeItem(_ title: String, action: Selector, key: String) -> NSMenuItem {
+    private func makeItem(
+        _ title: String,
+        action: Selector,
+        key: String,
+        modifiers: NSEvent.ModifierFlags? = nil
+    ) -> NSMenuItem {
         let mi = NSMenuItem(title: title, action: action, keyEquivalent: key)
         mi.target = self
+        if let modifiers {
+            mi.keyEquivalentModifierMask = modifiers
+        }
+        return mi
+    }
+
+    private func makeResponderItem(
+        _ title: String,
+        action: Selector,
+        key: String,
+        modifiers: NSEvent.ModifierFlags? = nil
+    ) -> NSMenuItem {
+        let mi = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        mi.target = nil
+        if let modifiers {
+            mi.keyEquivalentModifierMask = modifiers
+        }
         return mi
     }
 
@@ -152,7 +377,15 @@ public final class CatchAppRunner: NSObject, NSApplicationDelegate {
     @objc private func cmdCaptureWindow() { CaptureEngine.shared.captureWindow() }
     @objc private func cmdSelfTimer() { CaptureEngine.shared.captureWithSelfTimer() }
     @objc private func cmdScrollingCapture() { ScrollingCaptureController.shared.beginScrollingCapture() }
-    @objc private func cmdOpenLoomStudio() { ScreenRecordingStudio.shared.presentStudio() }
+    @objc private func cmdOpenLoomStudio() {
+        ScreenRecordingStudio.shared.presentStudio(captureMode: .fullscreen, cameraMode: .floatingBubble)
+    }
+    @objc private func cmdOpenDualISOStudio() {
+        ScreenRecordingStudio.shared.presentStudio(captureMode: .fullscreen, cameraMode: .separateFullResFile, exportWAVStems: true)
+    }
+    @objc private func cmdOpenPodcastCameraStudio() {
+        ScreenRecordingStudio.shared.presentStudio(captureMode: .cameraOnly, exportWAVStems: true)
+    }
     @objc private func cmdToggleTeleprompter() { TeleprompterController.shared.toggle() }
     @objc private func cmdEndAgentCaptureSession() { LocalStudioBridge.shared.endCaptureSession() }
     @objc private func cmdToggleCameraBubble() { CameraBubbleController.shared.toggle() }

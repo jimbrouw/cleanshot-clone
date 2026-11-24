@@ -143,12 +143,22 @@ final class LocalStudioBridge: ObservableObject {
         includeNotesInNextTake = false
         editNotes = ""
     }
-    func saveHandoff(for url: URL) throws {
+    func saveHandoff(for url: URL, bundle: RecordedTakeBundle? = nil) throws {
         guard let takeNotes else { return }
         self.takeNotes = nil
         let stamp = try mediaStamp(for: url)
-        let handoff = TakeHandoff(version: 2, mp4: url.lastPathComponent, script: takeNotes.script,
-                                  edit_notes: takeNotes.notes, media: stamp)
+        let handoff = TakeHandoff(
+            version: 2,
+            mp4: url.lastPathComponent,
+            script: takeNotes.script,
+            edit_notes: takeNotes.notes,
+            media: stamp,
+            screen_mp4: bundle?.screenVideoURL?.lastPathComponent,
+            camera_mp4: bundle?.cameraVideoURL?.lastPathComponent,
+            camera_resolution: bundle?.cameraResolution,
+            mic_wav: bundle?.microphoneStemURL?.lastPathComponent,
+            system_audio_wav: bundle?.systemAudioStemURL?.lastPathComponent
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let destination = handoffURL(for: url)
@@ -167,6 +177,11 @@ final class LocalStudioBridge: ObservableObject {
         let script: String
         let edit_notes: String
         let media: MediaStamp
+        let screen_mp4: String?
+        let camera_mp4: String?
+        let camera_resolution: String?
+        let mic_wav: String?
+        let system_audio_wav: String?
     }
     private func mediaStamp(for url: URL) throws -> MediaStamp {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -348,8 +363,29 @@ final class LocalStudioBridge: ObservableObject {
                 guard try mediaStamp(for: url) == selectedStamp, try readHandoff(for: url) == handoff else {
                     throw BridgeError.message("The media or edit notes changed. Select the take again.")
                 }
-                completion(["mp4_path": url.path, "handoff_path": handoffURL(for: url).path,
-                            "script": handoff.script, "edit_notes": handoff.edit_notes])
+                var payload: [String: Any] = [
+                    "mp4_path": url.path,
+                    "handoff_path": handoffURL(for: url).path,
+                    "script": handoff.script,
+                    "edit_notes": handoff.edit_notes
+                ]
+                let folder = url.deletingLastPathComponent()
+                if let camera = handoff.camera_mp4 {
+                    payload["camera_mp4_path"] = folder.appendingPathComponent(camera).path
+                }
+                if let screen = handoff.screen_mp4 {
+                    payload["screen_mp4_path"] = folder.appendingPathComponent(screen).path
+                }
+                if let res = handoff.camera_resolution {
+                    payload["camera_resolution"] = res
+                }
+                if let mic = handoff.mic_wav {
+                    payload["mic_wav_path"] = folder.appendingPathComponent(mic).path
+                }
+                if let sys = handoff.system_audio_wav {
+                    payload["system_audio_wav_path"] = folder.appendingPathComponent(sys).path
+                }
+                completion(payload)
             } catch { completion(["error": error.localizedDescription]) }
         default: completion(["error": "Unknown bridge action."])
         }

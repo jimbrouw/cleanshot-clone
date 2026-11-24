@@ -206,6 +206,36 @@ public final class HistoryStore: ObservableObject {
         return item
     }
 
+    /// Records an already-finalized media file on disk without copying its bytes into memory.
+    @discardableResult
+    public func recordExistingMedia(
+        poster: CGImage,
+        fileURL: URL,
+        title: String,
+        mediaType: CaptureMediaType = .video,
+        createdAt: Date = Date()
+    ) -> CaptureHistoryItem {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let size64 = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        let byteSize = Int(min(Int64(Int32.max), max(0, size64)))
+        let item = CaptureHistoryItem(
+            id: UUID(),
+            createdAt: createdAt,
+            title: title,
+            mediaType: mediaType,
+            filePath: fileURL.path,
+            projectPath: nil,
+            width: poster.width,
+            height: poster.height,
+            byteSize: byteSize,
+            isClosed: false,
+            closedAt: nil
+        )
+        insertOrUpdate(item)
+        reload()
+        return item
+    }
+
     public func insertOrUpdate(_ item: CaptureHistoryItem) {
         let sql = """
         INSERT OR REPLACE INTO history_items

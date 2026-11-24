@@ -150,4 +150,81 @@ final class TeleprompterTests: XCTestCase {
         var matcher = TeleprompterScriptMatcher(script: script, at: restart)
         XCTAssertNotNil(matcher.advance(with: "line 7 has enough words"))
     }
+
+    func testFuzzyMatchingRecoversFromSpeechRecognitionTyposWithoutFalseShortMatches() {
+        XCTAssertTrue(TeleprompterScriptMatcher.isFuzzyMatch("teleprompter", "teleprompt"))
+        XCTAssertTrue(TeleprompterScriptMatcher.isFuzzyMatch("screenshots", "screenshot"))
+        XCTAssertTrue(TeleprompterScriptMatcher.isFuzzyMatch("recording", "recordng"))
+        XCTAssertFalse(TeleprompterScriptMatcher.isFuzzyMatch("to", "do"))
+        XCTAssertFalse(TeleprompterScriptMatcher.isFuzzyMatch("in", "on"))
+
+        let script = "Welcome to Catch teleprompter walkthrough.\nLet us test fuzzy speech alignment today."
+        let text = script as NSString
+        var matcher = TeleprompterScriptMatcher(script: script)
+
+        let next = matcher.advance(with: "welcome to catcher teleprompt")
+        XCTAssertEqual(next, text.range(of: "walkthrough").location)
+        XCTAssertGreaterThan(matcher.completedCharacterOffset, 0)
+    }
+
+    func testCJKTokenizationAndContextualVocabularySkipStageDirections() {
+        let script = "[PAUSE AND SMILE]\nWelcome to CatchStudio teleprompter.\nこんにちは世界"
+        let hints = TeleprompterScriptMatcher.contextualVocabulary(in: script)
+        XCTAssertTrue(hints.contains("welcome"))
+        XCTAssertTrue(hints.contains("catchstudio"))
+        XCTAssertTrue(hints.contains("teleprompter"))
+        XCTAssertFalse(hints.contains("pause"))
+        XCTAssertFalse(hints.contains("smile"))
+
+        var matcher = TeleprompterScriptMatcher(script: "こんにちは世界です")
+        XCTAssertNotNil(matcher.advance(with: "こんにちは"))
+    }
+
+    func testJumpToCharacterRepositionsMatcherAndReadOffset() {
+        let script = "First line of the intro.\nSecond line with details.\nThird line to conclude."
+        let controller = TeleprompterController()
+        controller.scriptText = script
+        controller.scriptLayout.update(script: script, fontSize: 22, width: 320)
+
+        let thirdOffset = (script as NSString).range(of: "Third").location
+        controller.jump(toCharacter: thirdOffset)
+        XCTAssertEqual(controller.readCharacterOffset, thirdOffset)
+        XCTAssertGreaterThan(controller.scrollProgress, 0)
+    }
+
+    func testVoiceGateUsesNaturalHangoverWindow() {
+        var gate = TeleprompterVoiceGate()
+        gate.noteSpeech(at: 10.0)
+        XCTAssertTrue(gate.shouldScroll(at: 10.5))
+        XCTAssertTrue(gate.shouldScroll(at: 10.74))
+        XCTAssertFalse(gate.shouldScroll(at: 10.8))
+    }
+
+    func testLanguageDetectorIgnoresBracketedCuesAndSelectsMatchingLocale() {
+        let supported: Set<Locale> = [Locale(identifier: "en-US"), Locale(identifier: "es-ES"), Locale(identifier: "fr-FR")]
+        let spanish = "[WAIT FOR SCREEN TO LOAD]\nHola a todos, hoy vamos a probar esta nueva herramienta de grabación en macOS."
+        let detected = TeleprompterLanguageDetector.preferredLocale(for: spanish, supportedLocales: supported)
+        XCTAssertEqual(detected.identifier, "es-ES")
+    }
+
+    func testOnboardingToolSelectionDerivesTailoredPermissionsAndPersistsStep() {
+        let suite = "CatchOnboardingToolsTest-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let captureOnly = CatchOnboardingPreset.captureAndAnnotate.tools
+        OnboardingStateStore.saveSelectedTools(captureOnly, defaults: defaults)
+        XCTAssertEqual(OnboardingStateStore.loadSelectedTools(defaults: defaults), captureOnly)
+
+        let required = OnboardingStateStore.requiredPermissions(for: captureOnly)
+        XCTAssertEqual(required, [.screenRecording, .accessibility])
+
+        let optional = OnboardingStateStore.optionalPermissions(for: captureOnly)
+        XCTAssertEqual(optional, [.microphone, .camera, .speechRecognition])
+
+        OnboardingStateStore.saveStep(.permissions, defaults: defaults)
+        XCTAssertEqual(OnboardingStateStore.savedStepIndex(defaults: defaults), OnboardingStep.permissions.rawValue)
+        OnboardingStateStore.clearSavedStep(defaults: defaults)
+        XCTAssertEqual(OnboardingStateStore.savedStepIndex(defaults: defaults), OnboardingStep.tools.rawValue)
+    }
 }

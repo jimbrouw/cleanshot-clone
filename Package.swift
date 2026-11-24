@@ -31,6 +31,9 @@ let package = Package(
                 .linkedFramework("UniformTypeIdentifiers"),
                 .linkedFramework("Network"),
                 .linkedFramework("AVFoundation"),
+                .linkedFramework("AudioToolbox"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("NaturalLanguage"),
                 .linkedFramework("SoundAnalysis"),
                 .linkedFramework("Speech"),
                 .linkedLibrary("sqlite3")

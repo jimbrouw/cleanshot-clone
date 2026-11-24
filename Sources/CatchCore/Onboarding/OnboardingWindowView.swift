@@ -5,28 +5,32 @@ public final class OnboardingWindowController {
     public static let shared = OnboardingWindowController()
     private var window: NSWindow?
 
-    public func show(initialStep: Int = 0) {
+    public func show(initialStep: Int? = nil) {
         if let existing = window {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
+        let resolvedStep = initialStep ?? OnboardingStateStore.savedStepIndex()
         let view = OnboardingWizardView(
-            initialStep: initialStep,
+            initialStep: resolvedStep,
             onFinish: { [weak self] in
                 SettingsStore.shared.hasCompletedOnboarding = true
+                OnboardingStateStore.clearSavedStep()
+                CatchPermissionGuidePanel.shared.dismiss()
                 self?.close()
                 AllInOneHUDController.shared.show()
             },
             onClose: { [weak self] in
+                CatchPermissionGuidePanel.shared.dismiss()
                 self?.close()
             }
         )
 
         let hosting = NSHostingController(rootView: view)
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 880, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 880, height: 660),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -53,8 +57,145 @@ public final class OnboardingWindowController {
     }
 }
 
+// MARK: - Tool Selection Model & Persistence
+
+public enum CatchOnboardingTool: String, CaseIterable, Identifiable, Sendable {
+    case screenCapture
+    case globalHotkeys
+    case studioCamera
+    case teleprompterVoice
+    case clipboardHistory
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .screenCapture: return "Screen Capture, Scrolling & OCR"
+        case .globalHotkeys: return "Global Hotkeys & Window Snap"
+        case .studioCamera: return "Studio Camera Bubble & 4K ISO"
+        case .teleprompterVoice: return "Teleprompter & Voice Tracking"
+        case .clipboardHistory: return "Clipboard History & Sequential Paste"
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .screenCapture: return "Area crosshair, window capture, scrolling stitch, screen recording, and Vision OCR."
+        case .globalHotkeys: return "Trigger captures from anywhere with ⌥⇧⌘ or ⇧⌘ shortcuts and snap windows cleanly."
+        case .studioCamera: return "Floating webcam bubble for Loom-style walkthroughs and separate 4K camera stems."
+        case .teleprompterVoice: return "Viewer-invisible notch script that follows your spoken words and paces stage cues."
+        case .clipboardHistory: return "Smoked-glass history search for text, images, colors, QR codes, and Sequential Paste."
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .screenCapture: return "camera.viewfinder"
+        case .globalHotkeys: return "command"
+        case .studioCamera: return "video.circle.fill"
+        case .teleprompterVoice: return "text.word.spacing"
+        case .clipboardHistory: return "doc.on.clipboard.fill"
+        }
+    }
+
+    public var requiredPermissions: [CatchPermissionKind] {
+        switch self {
+        case .screenCapture: return [.screenRecording]
+        case .globalHotkeys: return [.accessibility]
+        case .studioCamera: return [.camera, .screenRecording]
+        case .teleprompterVoice: return [.microphone, .speechRecognition]
+        case .clipboardHistory: return [.accessibility]
+        }
+    }
+}
+
+public enum CatchOnboardingPreset: String, CaseIterable, Identifiable, Sendable {
+    case fullSuite
+    case captureAndAnnotate
+    case studioCreator
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .fullSuite: return "Full Catch Suite"
+        case .captureAndAnnotate: return "Screenshots & Annotate"
+        case .studioCreator: return "Video Studio & Teleprompter"
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .fullSuite: return "Every capture, studio, teleprompter & clipboard tool."
+        case .captureAndAnnotate: return "Lightweight setup — Screen Recording & Accessibility only."
+        case .studioCreator: return "Screen capture, webcam bubble & voice-tracked teleprompter."
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .fullSuite: return "sparkles.rectangle.stack"
+        case .captureAndAnnotate: return "crop"
+        case .studioCreator: return "video.badge.waveform"
+        }
+    }
+
+    public var tools: Set<CatchOnboardingTool> {
+        switch self {
+        case .fullSuite:
+            return Set(CatchOnboardingTool.allCases)
+        case .captureAndAnnotate:
+            return [.screenCapture, .globalHotkeys, .clipboardHistory]
+        case .studioCreator:
+            return [.screenCapture, .globalHotkeys, .studioCamera, .teleprompterVoice]
+        }
+    }
+}
+
+public enum OnboardingStateStore {
+    private static let stepKey = "com.catchapp.onboarding.savedStep"
+    private static let toolsKey = "com.catchapp.onboarding.selectedTools"
+
+    public static func savedStepIndex(defaults: UserDefaults = .standard) -> Int {
+        let value = defaults.integer(forKey: stepKey)
+        return OnboardingStep(rawValue: value)?.rawValue ?? 0
+    }
+
+    public static func saveStep(_ step: OnboardingStep, defaults: UserDefaults = .standard) {
+        defaults.set(step.rawValue, forKey: stepKey)
+    }
+
+    public static func clearSavedStep(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: stepKey)
+    }
+
+    public static func loadSelectedTools(defaults: UserDefaults = .standard) -> Set<CatchOnboardingTool> {
+        guard let rawValues = defaults.stringArray(forKey: toolsKey) else {
+            return Set(CatchOnboardingTool.allCases)
+        }
+        let parsed = Set(rawValues.compactMap(CatchOnboardingTool.init(rawValue:)))
+        return parsed
+    }
+
+    public static func saveSelectedTools(_ tools: Set<CatchOnboardingTool>, defaults: UserDefaults = .standard) {
+        let rawValues = CatchOnboardingTool.allCases.filter { tools.contains($0) }.map(\.rawValue)
+        defaults.set(rawValues, forKey: toolsKey)
+    }
+
+    public static func requiredPermissions(for tools: Set<CatchOnboardingTool>) -> [CatchPermissionKind] {
+        let needed = Set(tools.flatMap(\.requiredPermissions))
+        return CatchPermissionKind.allCases.filter { needed.contains($0) }
+    }
+
+    public static func optionalPermissions(for tools: Set<CatchOnboardingTool>) -> [CatchPermissionKind] {
+        let needed = Set(tools.flatMap(\.requiredPermissions))
+        return CatchPermissionKind.allCases.filter { !needed.contains($0) }
+    }
+}
+
 public enum OnboardingStep: Int, CaseIterable, Identifiable {
-    case permissions = 0
+    case tools = 0
+    case permissions
     case shortcuts
     case captureModes
     case annotate
@@ -65,6 +206,7 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
 
     public var title: String {
         switch self {
+        case .tools: return "Tools"
         case .permissions: return "Permissions"
         case .shortcuts: return "Shortcuts"
         case .captureModes: return "Capture"
@@ -76,7 +218,8 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
 
     public var headline: String {
         switch self {
-        case .permissions: return "Grant macOS Permissions in Seconds"
+        case .tools: return "Choose What You Want Catch to Do"
+        case .permissions: return "Grant Permissions for Your Selected Tools"
         case .shortcuts: return "Stop the macOS Screenshot Conflict"
         case .captureModes: return "Every Capture Mode in One HUD"
         case .annotate: return "Annotate, Beautify & Redact Instantly"
@@ -87,8 +230,10 @@ public enum OnboardingStep: Int, CaseIterable, Identifiable {
 
     public var subtitle: String {
         switch self {
+        case .tools:
+            return "Pick a preset or toggle individual tools. The next step will only ask for the macOS permissions your chosen tools actually need."
         case .permissions:
-            return "Catch needs Screen Recording to capture displays and Accessibility to register global keyboard shortcuts."
+            return "Click Grant to open the macOS prompt or System Settings pane. Catch watches live and resumes right here if macOS relaunches for Screen Recording."
         case .shortcuts:
             return "macOS intercepts ⇧⌘3, ⇧⌘4, and ⇧⌘5 for its built-in screenshot tool. Disable them in 1 click or use our conflict-free ⌥⇧⌘ keys."
         case .captureModes:
@@ -108,13 +253,33 @@ public struct OnboardingWizardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var stepNamespace
     @State private var currentStep: OnboardingStep
+    @State private var selectedTools: Set<CatchOnboardingTool>
+    @State private var showOptionalPermissions = false
+    @State private var pollingSurfaceID = UUID()
     public var onFinish: () -> Void
     public var onClose: () -> Void
 
     public init(initialStep: Int = 0, onFinish: @escaping () -> Void, onClose: @escaping () -> Void) {
-        self._currentStep = State(initialValue: OnboardingStep(rawValue: initialStep) ?? .permissions)
+        self._currentStep = State(initialValue: OnboardingStep(rawValue: initialStep) ?? .tools)
+        self._selectedTools = State(initialValue: OnboardingStateStore.loadSelectedTools())
         self.onFinish = onFinish
         self.onClose = onClose
+    }
+
+    private var activePreset: CatchOnboardingPreset? {
+        CatchOnboardingPreset.allCases.first { $0.tools == selectedTools }
+    }
+
+    private var requiredPermissions: [CatchPermissionKind] {
+        OnboardingStateStore.requiredPermissions(for: selectedTools)
+    }
+
+    private var optionalPermissions: [CatchPermissionKind] {
+        OnboardingStateStore.optionalPermissions(for: selectedTools)
+    }
+
+    private var grantedRequiredCount: Int {
+        requiredPermissions.filter { permissions.isGranted($0) }.count
     }
 
     public var body: some View {
@@ -126,54 +291,70 @@ public struct OnboardingWizardView: View {
                 headerBar
                 Rectangle().fill(RaycastTheme.borderSubtle).frame(height: 1)
 
-                VStack(spacing: 14) {
-                    animationStage
-                        .frame(height: 196)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .background(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(Color(red: 0.06, green: 0.08, blue: 0.13))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.42), radius: 14, x: 0, y: 6)
-                        .id(currentStep)
-                        .transition(reduceMotion ? .opacity : .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.98)), removal: .opacity))
+                ScrollView {
+                    VStack(spacing: 14) {
+                        if showsAnimationStage {
+                            animationStage
+                                .frame(height: 184)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(Color(red: 0.06, green: 0.08, blue: 0.13))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(RaycastTheme.specularGradient, lineWidth: 1)
+                                )
+                                .shadow(color: Color.black.opacity(0.42), radius: 14, x: 0, y: 6)
+                                .id(currentStep)
+                                .transition(reduceMotion ? .opacity : .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.98)), removal: .opacity))
+                        }
 
-                    VStack(spacing: 5) {
-                        Text(currentStep.headline)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundStyle(RaycastTheme.textPrimary)
-                            .contentTransition(.interpolate)
-                        Text(currentStep.subtitle)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(RaycastTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 660)
+                        VStack(spacing: 5) {
+                            Text(currentStep.headline)
+                                .font(.system(size: 21, weight: .bold, design: .rounded))
+                                .foregroundStyle(RaycastTheme.textPrimary)
+                                .contentTransition(.interpolate)
+                            Text(currentStep.subtitle)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(RaycastTheme.textSecondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 680)
+                        }
+                        .padding(.top, showsAnimationStage ? 0 : 6)
+
+                        stepActionPanel
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .id("panel-\(currentStep.rawValue)")
+                            .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
                     }
-
-                    stepActionPanel
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .id("panel-\(currentStep.rawValue)")
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
+                    .padding(.horizontal, 26)
+                    .padding(.vertical, 16)
                 }
-                .padding(.horizontal, 26)
-                .padding(.vertical, 14)
 
                 Rectangle().fill(RaycastTheme.borderSubtle).frame(height: 1)
                 footerBar
             }
         }
-        .frame(minWidth: 780, idealWidth: 880, minHeight: 600, idealHeight: 640)
+        .frame(minWidth: 780, idealWidth: 880, minHeight: 600, idealHeight: 660)
         .preferredColorScheme(.dark)
         .onAppear {
-            permissions.startPolling(interval: 1.0)
+            OnboardingStateStore.saveStep(currentStep)
+            permissions.setPollingSurface(pollingSurfaceID, visible: true)
+        }
+        .onChange(of: currentStep) { _, newStep in
+            OnboardingStateStore.saveStep(newStep)
+            if newStep == .permissions {
+                permissions.refreshStatus()
+            }
         }
         .onDisappear {
-            permissions.stopPolling()
+            permissions.setPollingSurface(pollingSurfaceID, visible: false)
         }
+    }
+
+    private var showsAnimationStage: Bool {
+        currentStep != .tools && currentStep != .permissions
     }
 
     private var headerBar: some View {
@@ -200,19 +381,20 @@ public struct OnboardingWizardView: View {
                     ForEach(OnboardingStep.allCases) { step in
                         let isActive = step == currentStep
                         Button {
+                            applyToolSelectionIfLeavingTools()
                             withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
                                 currentStep = step
                             }
                         } label: {
                             HStack(spacing: 5) {
                                 Circle()
-                                    .fill(isActive ? RaycastTheme.accent : RaycastTheme.textTertiary)
+                                    .fill(stepDotColor(for: step, isActive: isActive))
                                     .frame(width: 6, height: 6)
                                 Text(step.title)
                                     .font(.system(size: 11, weight: isActive ? .semibold : .medium))
                                     .foregroundStyle(isActive ? RaycastTheme.textPrimary : RaycastTheme.textSecondary)
                             }
-                            .padding(.horizontal, 10)
+                            .padding(.horizontal, 9)
                             .padding(.vertical, 5)
                             .background {
                                 if isActive {
@@ -235,14 +417,18 @@ public struct OnboardingWizardView: View {
         .padding(.bottom, 12)
     }
 
+    private func stepDotColor(for step: OnboardingStep, isActive: Bool) -> Color {
+        if step == .permissions && !requiredPermissions.isEmpty && grantedRequiredCount == requiredPermissions.count {
+            return .green
+        }
+        return isActive ? RaycastTheme.accent : RaycastTheme.textTertiary
+    }
+
     @ViewBuilder
     private var animationStage: some View {
         switch currentStep {
-        case .permissions:
-            PermissionsStageAnimationView(
-                hasScreenRecording: permissions.hasScreenRecording,
-                hasAccessibility: permissions.hasAccessibility
-            )
+        case .tools, .permissions:
+            EmptyView()
         case .shortcuts:
             ShortcutsStageAnimationView(macShortcutsDisabled: permissions.macOSScreenshotShortcutsDisabled)
         case .captureModes:
@@ -259,6 +445,8 @@ public struct OnboardingWizardView: View {
     @ViewBuilder
     private var stepActionPanel: some View {
         switch currentStep {
+        case .tools:
+            toolsSelectionPanel
         case .permissions:
             permissionsPanel
         case .shortcuts:
@@ -274,87 +462,340 @@ public struct OnboardingWizardView: View {
         }
     }
 
-    private var permissionsPanel: some View {
-        HStack(spacing: 16) {
-            permissionCard(
-                icon: "rectangle.dashed.badge.record",
-                title: "Screen Recording",
-                detail: "Required to capture windows, areas, scrolling pages & OCR.",
-                granted: permissions.hasScreenRecording,
-                buttonTitle: permissions.hasScreenRecording ? "Granted" : "Grant Screen Recording",
-                action: { _ = permissions.requestScreenRecording() },
-                openSettings: { permissions.openScreenRecordingSettings() }
-            )
-            permissionCard(
-                icon: "keyboard.badge.ellipsis",
-                title: "Accessibility",
-                detail: "Required for global hotkeys and window snapping.",
-                granted: permissions.hasAccessibility,
-                buttonTitle: permissions.hasAccessibility ? "Granted" : "Grant Accessibility",
-                action: { _ = permissions.requestAccessibility() },
-                openSettings: { permissions.openAccessibilitySettings() }
-            )
+    // MARK: - Step 0: Tool Selection
+
+    private var toolsSelectionPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ForEach(CatchOnboardingPreset.allCases) { preset in
+                    let isSelected = activePreset == preset
+                    Button {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            selectedTools = preset.tools
+                            OnboardingStateStore.saveSelectedTools(selectedTools)
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 7) {
+                                Image(systemName: preset.symbolName)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(isSelected ? RaycastTheme.accent : RaycastTheme.textSecondary)
+                                Text(preset.title)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(RaycastTheme.textPrimary)
+                                Spacer(minLength: 4)
+                                if isSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(RaycastTheme.accent)
+                                }
+                            }
+                            Text(preset.subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(RaycastTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .raycastCardSurface(cornerRadius: 12, isHighlighted: isSelected)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack {
+                Text("TOOLS TO ENABLE")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(RaycastTheme.textTertiary)
+                Spacer()
+                Text("\(selectedTools.count) of \(CatchOnboardingTool.allCases.count) selected · \(requiredPermissions.count) permissions needed next")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(RaycastTheme.textSecondary)
+            }
+            .padding(.top, 2)
+
+            VStack(spacing: 8) {
+                ForEach(CatchOnboardingTool.allCases) { tool in
+                    toolToggleRow(tool)
+                }
+            }
         }
     }
 
-    private func permissionCard(
-        icon: String,
-        title: String,
-        detail: String,
-        granted: Bool,
-        buttonTitle: String,
-        action: @escaping () -> Void,
-        openSettings: @escaping () -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(granted ? .green : Color.accentColor)
-                    .symbolEffect(.pulse, isActive: !granted)
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(RaycastTheme.textPrimary)
+    private func toolToggleRow(_ tool: CatchOnboardingTool) -> some View {
+        let isSelected = selectedTools.contains(tool)
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                if isSelected {
+                    selectedTools.remove(tool)
+                } else {
+                    selectedTools.insert(tool)
+                }
+                OnboardingStateStore.saveSelectedTools(selectedTools)
             }
-            Spacer()
-            HStack(spacing: 4) {
-                Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 10, weight: .bold))
-                Text(granted ? "Granted" : "Required")
-                    .font(.system(size: 10.5, weight: .bold))
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isSelected ? RaycastTheme.accent.opacity(0.20) : Color.white.opacity(0.06))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: tool.symbolName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isSelected ? RaycastTheme.accent : RaycastTheme.textSecondary)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(tool.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(RaycastTheme.textPrimary)
+                        ForEach(tool.requiredPermissions) { perm in
+                            Text(perm.displayName)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(RaycastTheme.textSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.white.opacity(0.07)))
+                        }
+                    }
+                    Text(tool.subtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(RaycastTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(isSelected ? RaycastTheme.accent : RaycastTheme.textTertiary)
             }
-            .foregroundStyle(granted ? .green : .orange)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3.5)
-            .background(
-                Capsule()
-                    .fill((granted ? Color.green : Color.orange).opacity(0.16))
-                    .overlay(Capsule().strokeBorder((granted ? Color.green : Color.orange).opacity(0.35), lineWidth: 0.75))
-            )
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .raycastCardSurface(cornerRadius: 12, isHighlighted: isSelected)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        Text(detail)
-            .font(.system(size: 12))
-            .foregroundStyle(RaycastTheme.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-        Spacer(minLength: 0)
-        HStack(spacing: 8) {
-            Button(buttonTitle, action: action)
-                .buttonStyle(.borderedProminent)
-                .tint(granted ? .green : Color.accentColor)
-                .disabled(granted)
-            if !granted {
-                Button("Open Settings", action: openSettings)
-                    .buttonStyle(.bordered)
-                Button("Check Again") { permissions.refreshStatus() }
-                    .buttonStyle(.borderless)
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Step 1: Tailored Permissions (Working Grant Flow)
+
+    private var permissionsPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Live readiness summary header
+            HStack(spacing: 10) {
+                let allReady = !requiredPermissions.isEmpty && grantedRequiredCount == requiredPermissions.count
+                Image(systemName: allReady ? "checkmark.seal.fill" : "key.horizontal.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(allReady ? .green : RaycastTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(requiredPermissions.isEmpty
+                         ? "No permissions required for your current selection"
+                         : allReady
+                            ? "All \(requiredPermissions.count) permissions for your tools are granted"
+                            : "\(grantedRequiredCount) of \(requiredPermissions.count) permissions granted")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.textPrimary)
+                    Text("Permissions stay local to this Mac. You can change any toggle in System Settings anytime.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(RaycastTheme.textSecondary)
+                }
+                Spacer()
+                Button("Check Status") {
+                    permissions.refreshStatus()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(13)
+            .raycastCardSurface(cornerRadius: 12, isHighlighted: !requiredPermissions.isEmpty && grantedRequiredCount == requiredPermissions.count)
+
+            if permissions.screenRecordingGrantedThisSession {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Screen Recording Granted — Relaunch Catch to Activate")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.green)
+                        Text("macOS applies Screen Recording to fresh processes. Catch will reopen right on this screen.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(RaycastTheme.textSecondary)
+                    }
+                    Spacer()
+                    Button("Relaunch Catch") {
+                        OnboardingStateStore.saveStep(.permissions)
+                        permissions.relaunchApplication()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .controlSize(.small)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.green.opacity(0.12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.green.opacity(0.35), lineWidth: 1)
+                        )
+                )
+            }
+
+            if !requiredPermissions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(requiredPermissions.enumerated()), id: \.element.id) { index, kind in
+                        if index > 0 {
+                            Divider()
+                                .overlay(RaycastTheme.borderSubtle)
+                                .padding(.vertical, 10)
+                        }
+                        permissionRow(kind, showUsedBy: true)
+                    }
+                }
+                .padding(15)
+                .raycastCardSurface(cornerRadius: 14)
+            }
+
+            if !optionalPermissions.isEmpty {
+                DisclosureGroup(isExpanded: $showOptionalPermissions) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(optionalPermissions.enumerated()), id: \.element.id) { index, kind in
+                            if index > 0 {
+                                Divider()
+                                    .overlay(RaycastTheme.borderSubtle)
+                                    .padding(.vertical, 10)
+                            }
+                            permissionRow(kind, showUsedBy: true)
+                        }
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Other Optional Permissions (\(optionalPermissions.count))")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(RaycastTheme.textPrimary)
+                        Text("Not required by your selected tools right now, but ready whenever you enable them.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(RaycastTheme.textSecondary)
+                    }
+                }
+                .padding(14)
+                .raycastCardSurface(cornerRadius: 14)
+            }
+
+            if let message = permissions.lastActionMessage {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(RaycastTheme.textSecondary)
+                    .padding(.horizontal, 4)
             }
         }
     }
-    .padding(15)
-    .frame(maxWidth: .infinity, minHeight: 130)
-    .raycastCardSurface(cornerRadius: 14, isHighlighted: granted)
-}
+
+    private func permissionRow(_ kind: CatchPermissionKind, showUsedBy: Bool) -> some View {
+        let state = permissions.state(for: kind)
+        let granted = state.isGranted
+        let usedBy = toolNames(for: kind)
+
+        return HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill((granted ? Color.green : Color.orange).opacity(0.16))
+                    .frame(width: 34, height: 34)
+                Image(systemName: kind.symbolName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(granted ? .green : .orange)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(kind.displayName)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(RaycastTheme.textPrimary)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: granted ? "checkmark.circle.fill" : (state == .denied ? "xmark.circle.fill" : "exclamationmark.triangle.fill"))
+                            .font(.system(size: 9.5, weight: .bold))
+                        Text(granted ? "Granted" : (state == .denied ? "Denied" : "Not Granted"))
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(granted ? .green : (state == .denied ? .red : .orange))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        Capsule()
+                            .fill((granted ? Color.green : (state == .denied ? Color.red : Color.orange)).opacity(0.16))
+                    )
+
+                    Spacer()
+                }
+
+                Text(kind.summary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(RaycastTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if showUsedBy && !usedBy.isEmpty {
+                    Text("Used by: \(usedBy)")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(RaycastTheme.textTertiary)
+                }
+
+                if !granted {
+                    HStack(spacing: 8) {
+                        Button(state == .denied ? "Open in Settings" : "Grant \(kind.displayName)") {
+                            permissions.request(kind, showFloatingGuide: true)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(RaycastTheme.accent)
+                        .controlSize(.small)
+
+                        Button("Open Settings") {
+                            permissions.openSettings(for: kind)
+                            if kind.requiresSystemSettingsToggle {
+                                CatchPermissionGuidePanel.shared.present(for: kind)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        if kind.requiresSystemSettingsToggle {
+                            Button("Reset & Retry") {
+                                permissions.resetAndRequest(kind, showFloatingGuide: true)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(RaycastTheme.textSecondary)
+                            .controlSize(.small)
+                            .help("Clears a stale macOS permission entry from an older build and asks fresh")
+                        }
+                    }
+                    .padding(.top, 3)
+                }
+            }
+        }
+    }
+
+    private func toolNames(for permission: CatchPermissionKind) -> String {
+        let matchingSelected = CatchOnboardingTool.allCases.filter {
+            selectedTools.contains($0) && $0.requiredPermissions.contains(permission)
+        }
+        let source = matchingSelected.isEmpty
+            ? CatchOnboardingTool.allCases.filter { $0.requiredPermissions.contains(permission) }
+            : matchingSelected
+        return source.map(\.title).joined(separator: ", ")
+    }
+
+    private func applyToolSelectionIfLeavingTools() {
+        guard currentStep == .tools else { return }
+        OnboardingStateStore.saveSelectedTools(selectedTools)
+        SettingsStore.shared.clipboardHistoryEnabled = selectedTools.contains(.clipboardHistory)
+    }
+
+    // MARK: - Step 2: Shortcuts
 
     private var shortcutsPanel: some View {
         VStack(spacing: 12) {
@@ -413,6 +854,8 @@ public struct OnboardingWizardView: View {
         }
         .frame(maxWidth: .infinity)
     }
+
+    // MARK: - Steps 3-6: Interactive Feature Tour
 
     private var captureModesPanel: some View {
         HStack(spacing: 12) {
@@ -566,6 +1009,7 @@ public struct OnboardingWizardView: View {
         HStack {
             Button("Skip Setup") {
                 SettingsStore.shared.hasCompletedOnboarding = true
+                OnboardingStateStore.clearSavedStep()
                 onClose()
             }
             .buttonStyle(.plain)
@@ -574,7 +1018,7 @@ public struct OnboardingWizardView: View {
             Spacer()
 
             HStack(spacing: 10) {
-                if currentStep != .permissions {
+                if currentStep != .tools {
                     Button("Back") {
                         withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
                             if let prev = OnboardingStep(rawValue: currentStep.rawValue - 1) {
@@ -586,19 +1030,22 @@ public struct OnboardingWizardView: View {
                 }
 
                 if currentStep != .workflow {
-                    Button("Continue") {
+                    Button(currentStep == .tools ? "Continue to Permissions" : "Continue") {
+                        applyToolSelectionIfLeavingTools()
                         withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
                             if let next = OnboardingStep(rawValue: currentStep.rawValue + 1) {
                                 currentStep = next
                             }
                         }
                     }
+                    .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .tint(Color.accentColor)
                 } else {
                     Button("Finish Setup & Start Using Catch") {
                         onFinish()
                     }
+                    .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                 }
